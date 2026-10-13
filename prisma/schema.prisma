@@ -1,0 +1,219 @@
+// PLANNED SCHEMA — not connected to anything yet.
+//
+// COVA does not depend on Prisma today: `@prisma/client` and `prisma` are NOT in package.json,
+// and no database is configured. This file documents the intended PostgreSQL data model so the
+// backend phase can start from an agreed design. See docs/ARCHITECTURE.md for the rollout plan.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  MENTOR
+  ADMIN
+}
+
+enum MembershipRole {
+  OWNER
+  MODERATOR
+  MEMBER
+}
+
+enum CourseLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum LessonKind {
+  VIDEO
+  READING
+  EXERCISE
+}
+
+enum ChallengeKind {
+  DAILY
+  WEEKLY
+  CODING
+  COMMUNITY
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum NotificationKind {
+  ASSIGNMENT
+  GROUP
+  CHALLENGE
+  MESSAGE
+  SYSTEM
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String? // omit if using an external auth provider
+  role         Role     @default(STUDENT)
+  createdAt    DateTime @default(now())
+
+  profile       Profile?
+  progress      UserProgress?
+  memberships   GroupMembership[]
+  sentMessages  Message[]         @relation("SentMessages")
+  receivedDMs   Message[]         @relation("ReceivedMessages")
+  submissions   Submission[]
+  notifications Notification[]
+  ownedGroups   Group[]           @relation("GroupOwner")
+  authoredCourses Course[]
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName String
+  headline    String?
+  bio         String?
+  school      String?
+  major       String?
+  location    String?
+  skills      String[]
+  interests   String[]
+}
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  category    String
+  isPrivate   Boolean  @default(false)
+  ownerId     String
+  owner       User     @relation("GroupOwner", fields: [ownerId], references: [id])
+  createdAt   DateTime @default(now())
+
+  memberships GroupMembership[]
+  messages    Message[]
+}
+
+model GroupMembership {
+  id       String         @id @default(cuid())
+  groupId  String
+  userId   String
+  role     MembershipRole @default(MEMBER)
+  joinedAt DateTime       @default(now())
+  group    Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  senderId    String
+  recipientId String? // set for direct messages
+  groupId     String? // set for group messages
+  body        String
+  sentAt      DateTime  @default(now())
+  readAt      DateTime?
+  sender      User      @relation("SentMessages", fields: [senderId], references: [id])
+  recipient   User?     @relation("ReceivedMessages", fields: [recipientId], references: [id])
+  group       Group?    @relation(fields: [groupId], references: [id])
+
+  @@index([senderId, recipientId, sentAt])
+  @@index([groupId, sentAt])
+}
+
+model Course {
+  id          String      @id @default(cuid())
+  title       String
+  description String
+  level       CourseLevel
+  category    String
+  authorId    String
+  author      User        @relation(fields: [authorId], references: [id])
+
+  lessons     Lesson[]
+  assignments Assignment[]
+}
+
+model Lesson {
+  id       String     @id @default(cuid())
+  courseId String
+  title    String
+  kind     LessonKind
+  position Int
+  minutes  Int
+  content  String
+  course   Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, position])
+}
+
+model Assignment {
+  id          String   @id @default(cuid())
+  courseId    String
+  title       String
+  description String
+  dueAt       DateTime
+  points      Int
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  submissions Submission[]
+}
+
+model Submission {
+  id           String     @id @default(cuid())
+  assignmentId String
+  userId       String
+  body         String
+  submittedAt  DateTime   @default(now())
+  grade        Int?
+  feedback     String?
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, userId])
+}
+
+model Challenge {
+  id          String        @id @default(cuid())
+  title       String
+  description String
+  kind        ChallengeKind
+  difficulty  Difficulty
+  points      Int
+}
+
+model UserProgress {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xp                    Int      @default(0)
+  level                 Int      @default(1)
+  completedLessonIds    String[]
+  completedChallengeIds String[]
+  badgeIds              String[]
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  kind      NotificationKind
+  title     String
+  body      String
+  href      String?
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}

@@ -1,0 +1,2732 @@
+﻿
+===== src\lib\social-store.ts =====
+import { useSyncExternalStore } from "react";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { fail, ok } from "@/lib/result";
+import { getSupabase } from "@/lib/supabase/client";
+import type { Tone } from "@/types";
+import type {
+  ActionResult,
+  Community,
+  CommunityMember,
+  CommunityPost,
+  CommunityRole,
+  CommunityVisibility,
+  DirectMessage,
+  Friendship,
+  JoinOutcome,
+  JoinRequest,
+  PostingPolicy,
+  SocialState,
+  SocialUser,
+} from "@/types/social";
+
+/**
+ * Social data for the Connect section (people, friends, messages, communities), backed by
+ * Supabase (Postgres + Auth + Realtime). Schema, RLS and RPCs: supabase/migrations.
+ *
+ * How it works
+ *  - The store keeps a read cache (`SocialState`) filled by queries that Row Level Security has
+ *    already filtered, so it only ever holds what the signed-in person may see. The selectors
+ *    below (roleOf, searchUsers, listThreads...) are unchanged and read that cache.
+ *  - Realtime subscriptions mark slices of the cache stale; they are re-read after a short delay.
+ *  - Every action is async and returns `ActionResult` like before. Who is acting always comes from
+ *    the Supabase session. The `me` argument is kept so call sites don't change, but it is NOT
+ *    trusted and not sent to the server. The database enforces the rules (RLS, column grants and
+ *    RPCs); the checks here only produce friendlier messages.
+ *  - UI code sees public ids (COVA-XXXXXX). Auth user ids stay inside this file.
+ */
+
+export { fail, ok };
+
+export const COMMUNITY_CATEGORIES = [
+  "Study",
+  "Project",
+  "Coding",
+  "Design",
+  "Languages",
+  "Other",
+] as const;
+
+export const LIMITS = {
+  name: { min: 3, max: 60 },
+  description: { min: 10, max: 500 },
+  text: { max: 2000 },
+} as const;
+
+/** How much history is loaded at once (newest first). Older items need pagination. */
+const MESSAGE_LIMIT = 1000;
+const POST_LIMIT = 1000;
+
+/* ------------------------------------------------------------------ helpers */
+
+export function pairKey(a: string, b: string): string {
+  return [a, b].sort().join("|");
+}
+
+export function normalizeCode(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[\s-]/g, "");
+}
+
+/** Short time for today, short date otherwise. Only call after hydration (it uses local time). */
+export function formatWhen(at: number): string {
+  const d = new Date(at);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/* -------------------------------------------------------------- database rows */
+
+interface ProfileRow {
+  id: string;
+  public_id: string;
+  display_name: string;
+  headline: string;
+  tone: string;
+  is_sample: boolean;
+  created_at: string;
+}
+interface FriendshipRow {
+  from_id: string;
+  to_id: string;
+  status: "pending" | "accepted";
+  created_at: string;
+}
+interface MessageRow {
+  id: string;
+  from_id: string;
+  to_id: string;
+  body: string;
+  created_at: string;
+}
+interface ReadRow {
+  other_id: string;
+  read_at: string;
+}
+interface CommunityRow {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  visibility: CommunityVisibility;
+  posting_policy: PostingPolicy;
+  owner_id: string;
+  created_at: string;
+}
+interface MemberRow {
+  community_id: string;
+  user_id: string;
+  role: CommunityRole;
+  joined_at: string;
+}
+interface RequestRow {
+  id: string;
+  community_id: string;
+  user_id: string;
+  created_at: string;
+}
+interface PostRow {
+  id: string;
+  community_id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+}
+interface CodeRow {
+  community_id: string;
+  code: string;
+}
+
+const PROFILE_COLUMNS = "id,public_id,display_name,headline,tone,is_sample,created_at";
+
+interface DbError {
+  message: string;
+  code?: string;
+}
+
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+/** Turns a database error into a message for the UI. Our own RPC errors are already readable. */
+function describe(error: DbError, denied = "You don't have permission to do that."): string {
+  if (error.code === "P0001") return error.message; // raise exception '...' in our functions
+  if (error.code === "42501") return denied; // RLS or missing grant
+  return GENERIC_ERROR;
+}
+
+function toTone(value: string): Tone {
+  return value === "pale" || value === "muted" ? value : "soft";
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/* -------------------------------------------------------------------- state */
+
+const INITIAL: SocialState = {
+  meId: null,
+  ready: false,
+  users: {},
+  friendships: {},
+  messages: [],
+  reads: {},
+  communities: {},
+  members: [],
+  requests: [],
+  posts: [],
+};
+
+let state: SocialState = INITIAL;
+const listeners = new Set<() => void>();
+
+/** JSON of each slice last committed, so identical data never triggers a re-render. */
+let signatures: Partial<Record<keyof SocialState, string>> = {};
+
+function emit(): void {
+  listeners.forEach((l) => l());
+}
+
+function commit(patch: Partial<SocialState>): void {
+  let next: SocialState = state;
+  let changed = false;
+  for (const key of Object.keys(patch) as (keyof SocialState)[]) {
+    const value = patch[key];
+    const signature = JSON.stringify(value);
+    if (signatures[key] === signature) continue;
+    signatures[key] = signature;
+    next = Object.assign({}, next, { [key]: value });
+    changed = true;
+  }
+  if (changed) {
+    state = next;
+    emit();
+  }
+}
+
+function resetState(ready: boolean): void {
+  signatures = {};
+  state = { ...INITIAL, ready };
+  emit();
+}
+
+/* ------------------------------------------------------------ people cache */
+
+/** public id -> person, and the two id maps. Auth user ids never leave this file. */
+const people = new Map<string, SocialUser>();
+const publicByUuid = new Map<string, string>();
+const uuidByPublic = new Map<string, string>();
+
+let meUuid: string | null = null;
+let meEmail = "";
+
+function registerProfiles(rows: ProfileRow[]): void {
+  for (const r of rows) {
+    publicByUuid.set(r.id, r.public_id);
+    uuidByPublic.set(r.public_id, r.id);
+    people.set(r.public_id, {
+      id: r.public_id,
+      email: r.id === meUuid ? meEmail : "",
+      displayName: r.display_name,
+      headline: r.headline,
+      tone: toTone(r.tone),
+      createdAt: Date.parse(r.created_at),
+      sample: r.is_sample,
+    });
+  }
+}
+
+function usersSnapshot(): Record<string, SocialUser> {
+  return Object.fromEntries(people);
+}
+
+function pub(uuid: string): string {
+  return publicByUuid.get(uuid) ?? "";
+}
+
+async function rows<T>(
+  query: PromiseLike<{ data: unknown; error: DbError | null }>,
+): Promise<T[]> {
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as T[];
+}
+
+/** Loads the profiles for these auth ids that aren't cached yet (in chunks: URLs have limits). */
+async function ensureProfiles(sb: SupabaseClient, ids: string[]): Promise<void> {
+  const missing = [...new Set(ids)].filter((id) => id && !publicByUuid.has(id));
+  for (let i = 0; i < missing.length; i += 100) {
+    const chunk = missing.slice(i, i + 100);
+    registerProfiles(await rows<ProfileRow>(sb.from("profiles").select(PROFILE_COLUMNS).in("id", chunk)));
+  }
+}
+
+async function resolveUuid(sb: SupabaseClient, publicId: string): Promise<string | null> {
+  const cached = uuidByPublic.get(publicId);
+  if (cached) return cached;
+  const { data } = await sb
+    .from("profiles")
+    .select(PROFILE_COLUMNS)
+    .eq("public_id", publicId)
+    .maybeSingle();
+  if (!data) return null;
+  registerProfiles([data as ProfileRow]);
+  commit({ users: usersSnapshot() });
+  return uuidByPublic.get(publicId) ?? null;
+}
+
+/* ----------------------------------------------------------------- loaders */
+
+type Slice = "profile" | "friends" | "messages" | "communities" | "posts";
+
+/** Communities that exist and are private but that this person can't read (see probeCommunity). */
+const lockedCommunities = new Set<string>();
+
+function lockedPlaceholder(id: string): Community {
+  // Reveals nothing: the detail screen shows its "private, enter a code" gate for these.
+  return {
+    id,
+    name: "",
+    description: "",
+    category: "",
+    visibility: "private",
+    postingPolicy: "owner",
+    joinCode: "",
+    ownerId: "",
+    createdAt: 0,
+  };
+}
+
+const loaders: Record<Slice, (sb: SupabaseClient, me: string) => Promise<void>> = {
+  async profile(sb, me) {
+    await ensureProfiles(sb, [me]);
+    commit({ users: usersSnapshot() });
+  },
+
+  async friends(sb) {
+    const data = await rows<FriendshipRow>(
+      sb.from("friendships").select("from_id,to_id,status,created_at"),
+    );
+    await ensureProfiles(sb, data.flatMap((r) => [r.from_id, r.to_id]));
+    const friendships: Record<string, Friendship> = {};
+    for (const r of data) {
+      const from = pub(r.from_id);
+      const to = pub(r.to_id);
+      if (!from || !to) continue;
+      const id = pairKey(from, to);
+      friendships[id] = { id, fromId: from, toId: to, status: r.status, createdAt: Date.parse(r.created_at) };
+    }
+    commit({ users: usersSnapshot(), friendships });
+  },
+
+  async messages(sb, me) {
+    const [msgs, readRows] = await Promise.all([
+      rows<MessageRow>(
+        sb
+          .from("direct_messages")
+          .select("id,from_id,to_id,body,created_at")
+          .order("created_at", { ascending: false })
+          .limit(MESSAGE_LIMIT),
+      ),
+      rows<ReadRow>(sb.from("message_reads").select("other_id,read_at")),
+    ]);
+    msgs.reverse();
+    await ensureProfiles(sb, [...msgs.flatMap((m) => [m.from_id, m.to_id]), ...readRows.map((r) => r.other_id)]);
+    const meKey = pub(me);
+    const messages: DirectMessage[] = [];
+    for (const m of msgs) {
+      const from = pub(m.from_id);
+      const to = pub(m.to_id);
+      if (!from || !to) continue;
+      messages.push({ id: m.id, threadId: pairKey(from, to), fromId: from, text: m.body, at: Date.parse(m.created_at) });
+    }
+    const reads: Record<string, number> = {};
+    for (const r of readRows) {
+      const other = pub(r.other_id);
+      if (other) reads[`${meKey}:${pairKey(meKey, other)}`] = Date.parse(r.read_at);
+    }
+    commit({ users: usersSnapshot(), messages, reads });
+  },
+
+  async communities(sb) {
+    const [communityRows, memberRows, requestRows, codeRows] = await Promise.all([
+      rows<CommunityRow>(
+        sb
+          .from("communities")
+          .select("id,name,description,category,visibility,posting_policy,owner_id,created_at"),
+      ),
+      rows<MemberRow>(sb.from("community_members").select("community_id,user_id,role,joined_at")),
+      rows<RequestRow>(sb.from("join_requests").select("id,community_id,user_id,created_at")),
+      rows<CodeRow>(sb.from("community_join_codes").select("community_id,code")),
+    ]);
+    await ensureProfiles(sb, [
+      ...communityRows.map((c) => c.owner_id),
+      ...memberRows.map((m) => m.user_id),
+      ...requestRows.map((r) => r.user_id),
+    ]);
+    const codes = new Map(codeRows.map((c) => [c.community_id, c.code]));
+    const communities: Record<string, Community> = {};
+    for (const c of communityRows) {
+      lockedCommunities.delete(c.id); // it is readable now
+      communities[c.id] = {
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        category: c.category,
+        visibility: c.visibility,
+        postingPolicy: c.posting_policy,
+        joinCode: codes.get(c.id) ?? "",
+        ownerId: pub(c.owner_id),
+        createdAt: Date.parse(c.created_at),
+      };
+    }
+    for (const id of lockedCommunities) communities[id] ??= lockedPlaceholder(id);
+    const members: CommunityMember[] = memberRows.flatMap((m) => {
+      const userId = pub(m.user_id);
+      return userId ? [{ communityId: m.community_id, userId, role: m.role, joinedAt: Date.parse(m.joined_at) }] : [];
+    });
+    const requests: JoinRequest[] = requestRows.flatMap((r) => {
+      const userId = pub(r.user_id);
+      return userId ? [{ id: r.id, communityId: r.community_id, userId, createdAt: Date.parse(r.created_at) }] : [];
+    });
+    commit({ users: usersSnapshot(), communities, members, requests });
+  },
+
+  async posts(sb) {
+    const data = await rows<PostRow>(
+      sb
+        .from("community_posts")
+        .select("id,community_id,author_id,body,created_at")
+        .order("created_at", { ascending: false })
+        .limit(POST_LIMIT),
+    );
+    await ensureProfiles(sb, data.map((p) => p.author_id));
+    const posts: CommunityPost[] = data.flatMap((p) => {
+      const authorId = pub(p.author_id);
+      return authorId
+        ? [{ id: p.id, communityId: p.community_id, authorId, text: p.body, at: Date.parse(p.created_at) }]
+        : [];
+    });
+    commit({ users: usersSnapshot(), posts });
+  },
+};
+
+/** Loads run one after another per slice, so a refresh started after a write always sees it. */
+const chains = new Map<Slice, Promise<void>>();
+
+function refresh(slice: Slice): Promise<void> {
+  const prev = chains.get(slice) ?? Promise.resolve();
+  const next = prev.then(async () => {
+    if (!meUuid) return;
+    const sb = getSupabase();
+    try {
+      await loaders[slice](sb, meUuid);
+    } catch (error) {
+      // Offline or a transient error: keep the cache we have; the next event or reconnect retries.
+      console.warn(`[social] could not refresh ${slice}`, error);
+    }
+  });
+  chains.set(slice, next);
+  return next;
+}
+
+const timers = new Map<Slice, ReturnType<typeof setTimeout>>();
+
+/** Realtime events arrive in bursts (one per row); re-read once. */
+function scheduleRefresh(slice: Slice): void {
+  const existing = timers.get(slice);
+  if (existing) clearTimeout(existing);
+  timers.set(
+    slice,
+    setTimeout(() => {
+      timers.delete(slice);
+      void refresh(slice);
+    }, 120),
+  );
+}
+
+function refreshAll(): Promise<void[]> {
+  return Promise.all((["friends", "messages", "communities", "posts"] as const).map(refresh));
+}
+
+/* --------------------------------------------------------------- realtime */
+
+let channel: ReturnType<SupabaseClient["channel"]> | null = null;
+
+function subscribeRealtime(sb: SupabaseClient, me: string): void {
+  const ch = sb.channel(`cova-social-${me}`);
+  const listen = (table: string, slice: Slice, filter?: string) => {
+    ch.on("postgres_changes", { event: "*", schema: "public", table, filter }, () => scheduleRefresh(slice));
+  };
+  // RLS decides which rows each person is told about. Filters only reduce the traffic.
+  listen("profiles", "profile", `id=eq.${me}`);
+  listen("friendships", "friends");
+  listen("direct_messages", "messages", `to_id=eq.${me}`);
+  listen("direct_messages", "messages", `from_id=eq.${me}`);
+  listen("message_reads", "messages", `user_id=eq.${me}`);
+  listen("communities", "communities");
+  listen("community_join_codes", "communities");
+  listen("community_members", "communities");
+  listen("join_requests", "communities");
+  listen("community_posts", "posts");
+  // Anything missed while the socket was down is picked up when it (re)connects.
+  ch.subscribe((status) => {
+    if (status === "SUBSCRIBED") void refreshAll();
+  });
+  channel = ch;
+}
+
+function stopRealtime(): void {
+  for (const t of timers.values()) clearTimeout(t);
+  timers.clear();
+  if (channel) {
+    void getSupabase().removeChannel(channel);
+    channel = null;
+  }
+}
+
+/* ----------------------------------------------------------------- session */
+
+let started = false;
+let currentUser: string | null = null;
+let epoch = 0;
+
+async function startSession(user: User, token: number): Promise<void> {
+  const sb = getSupabase();
+  meUuid = user.id;
+  meEmail = user.email ?? "";
+  await refresh("profile");
+  if (token !== epoch) return;
+  const meKey = pub(user.id);
+  if (!meKey) {
+    console.error("[social] no profile row for the signed-in user");
+    commit({ ready: true });
+    return;
+  }
+  commit({ meId: meKey });
+  await refreshAll();
+  if (token !== epoch) return;
+  commit({ ready: true });
+  subscribeRealtime(sb, user.id);
+}
+
+function handleUser(user: User | null): void {
+  const id = user?.id ?? null;
+  if (id === currentUser) {
+    if (user) meEmail = user.email ?? meEmail;
+    return;
+  }
+  currentUser = id;
+  const token = ++epoch;
+  stopRealtime();
+  chains.clear();
+  people.clear();
+  publicByUuid.clear();
+  uuidByPublic.clear();
+  lockedCommunities.clear();
+  markFailures.clear();
+  markPending.clear();
+  meUuid = null;
+  meEmail = "";
+  resetState(!user);
+  if (user) void startSession(user, token);
+}
+
+function ensureStarted(): void {
+  if (started || typeof window === "undefined") return;
+  started = true;
+  try {
+    getSupabase().auth.onAuthStateChange((_event, session) => {
+      // Never await Supabase calls inside this callback (supabase-js can deadlock); defer.
+      const user = session?.user ?? null;
+      setTimeout(() => handleUser(user), 0);
+    });
+  } catch (error) {
+    console.error(error);
+    resetState(true);
+  }
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  ensureStarted();
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot(): SocialState {
+  return state;
+}
+
+function getServerSnapshot(): SocialState {
+  return INITIAL;
+}
+
+export function useSocial(): SocialState {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/* ---------------------------------------------------------------- selectors */
+
+export function roleOf(s: SocialState, communityId: string, userId: string): CommunityRole | null {
+  return s.members.find((m) => m.communityId === communityId && m.userId === userId)?.role ?? null;
+}
+
+export function isStaff(role: CommunityRole | null): boolean {
+  return role === "owner" || role === "admin";
+}
+
+export function canPost(community: Community, role: CommunityRole | null): boolean {
+  if (!role) return false;
+  if (community.postingPolicy === "everyone") return true;
+  if (community.postingPolicy === "admins") return isStaff(role);
+  return role === "owner";
+}
+
+export function memberCount(s: SocialState, communityId: string): number {
+  return s.members.filter((m) => m.communityId === communityId).length;
+}
+
+export function friendshipBetween(s: SocialState, a: string, b: string): Friendship | undefined {
+  return s.friendships[pairKey(a, b)];
+}
+
+export type RelationStatus = "none" | "friends" | "sent" | "received";
+
+export function relationStatus(s: SocialState, me: string, other: string): RelationStatus {
+  const f = friendshipBetween(s, me, other);
+  if (!f) return "none";
+  if (f.status === "accepted") return "friends";
+  return f.fromId === me ? "sent" : "received";
+}
+
+/** Finds people by display name or ID (case-insensitive, partial). Needs 2+ characters. */
+export function searchUsers(s: SocialState, meId: string, query: string): SocialUser[] {
+  const q = query.trim().toLowerCase().replace(/^@/, "");
+  if (q.length < 2) return [];
+  const score = (u: SocialUser): number => {
+    const id = u.id.toLowerCase();
+    const name = u.displayName.toLowerCase();
+    if (id === q) return 0;
+    if (name === q) return 1;
+    if (name.startsWith(q) || id.startsWith(q)) return 2;
+    return 3;
+  };
+  return Object.values(s.users)
+    .filter(
+      (u) =>
+        u.id !== meId && (u.displayName.toLowerCase().includes(q) || u.id.toLowerCase().includes(q)),
+    )
+    .sort((a, b) => score(a) - score(b) || a.displayName.localeCompare(b.displayName))
+    .slice(0, 30);
+}
+
+export function friendsOf(s: SocialState, me: string): SocialUser[] {
+  return Object.values(s.friendships)
+    .filter((f) => f.status === "accepted" && (f.fromId === me || f.toId === me))
+    .flatMap((f) => {
+      const user = s.users[f.fromId === me ? f.toId : f.fromId];
+      return user ? [user] : [];
+    })
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export function incomingRequests(s: SocialState, me: string): SocialUser[] {
+  return Object.values(s.friendships)
+    .filter((f) => f.status === "pending" && f.toId === me)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .flatMap((f) => {
+      const user = s.users[f.fromId];
+      return user ? [user] : [];
+    });
+}
+
+export function outgoingRequests(s: SocialState, me: string): SocialUser[] {
+  return Object.values(s.friendships)
+    .filter((f) => f.status === "pending" && f.fromId === me)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .flatMap((f) => {
+      const user = s.users[f.toId];
+      return user ? [user] : [];
+    });
+}
+
+export interface ThreadSummary {
+  otherId: string;
+  other: SocialUser | undefined;
+  last: DirectMessage;
+  unread: number;
+}
+
+function otherOf(threadId: string, me: string): string {
+  return threadId.split("|").find((id) => id !== me) ?? "";
+}
+
+export function listThreads(s: SocialState, me: string): ThreadSummary[] {
+  const byThread = new Map<string, DirectMessage[]>();
+  for (const m of s.messages) {
+    if (!m.threadId.split("|").includes(me)) continue;
+    const list = byThread.get(m.threadId) ?? [];
+    list.push(m);
+    byThread.set(m.threadId, list);
+  }
+  const threads: ThreadSummary[] = [];
+  for (const [threadId, list] of byThread) {
+    const last = list[list.length - 1];
+    if (!last) continue;
+    const readAt = s.reads[`${me}:${threadId}`] ?? 0;
+    const otherId = otherOf(threadId, me);
+    threads.push({
+      otherId,
+      other: s.users[otherId],
+      last,
+      unread: list.filter((m) => m.fromId !== me && m.at > readAt).length,
+    });
+  }
+  return threads.sort((a, b) => b.last.at - a.last.at);
+}
+
+export function threadMessages(s: SocialState, me: string, otherId: string): DirectMessage[] {
+  const id = pairKey(me, otherId);
+  return s.messages.filter((m) => m.threadId === id);
+}
+
+export function unreadTotal(s: SocialState, me: string): number {
+  return listThreads(s, me).reduce((sum, t) => sum + t.unread, 0);
+}
+
+/* ------------------------------------------------------------------ identity */
+
+/**
+ * The signed-in person as a social user. Returns null until the first load has finished (and
+ * when nobody is signed in), so components should show a skeleton while it is null.
+ * The profile itself is created by the database when the account is created.
+ */
+export function useMe(): SocialUser | null {
+  const social = useSocial();
+  if (!social.ready || !social.meId) return null;
+  return social.users[social.meId] ?? null;
+}
+
+/* ------------------------------------------------------------------- actions */
+
+interface Session {
+  sb: SupabaseClient;
+  /** The auth user id from the session. The only identity the server trusts. */
+  me: string;
+}
+
+async function session(notSignedIn = "Sign in to continue."): Promise<ActionResult<Session>> {
+  ensureStarted();
+  const sb = getSupabase();
+  const { data } = await sb.auth.getSession();
+  const user = data.session?.user;
+  if (!user) return fail(notSignedIn);
+  return ok({ sb, me: user.id });
+}
+
+function validateCommunityFields(input: {
+  name: string;
+  description: string;
+}): ActionResult<{ name: string; description: string }> {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  if (name.length < LIMITS.name.min)
+    return fail(`Give the community a name of at least ${LIMITS.name.min} characters.`);
+  if (name.length > LIMITS.name.max)
+    return fail(`The name can be at most ${LIMITS.name.max} characters.`);
+  if (description.length < LIMITS.description.min)
+    return fail(`Describe the community in at least ${LIMITS.description.min} characters.`);
+  if (description.length > LIMITS.description.max)
+    return fail(`The description can be at most ${LIMITS.description.max} characters.`);
+  return ok({ name, description });
+}
+
+export interface JoinResult {
+  communityId: string;
+  outcome: JoinOutcome;
+}
+
+export interface CommunityInput {
+  name: string;
+  description: string;
+  category: string;
+  visibility: CommunityVisibility;
+  postingPolicy: PostingPolicy;
+}
+
+/** Conversations being marked read, and when marking last failed (to avoid retry loops). */
+const markPending = new Set<string>();
+const markFailures = new Map<string, number>();
+const MARK_RETRY_MS = 30_000;
+
+export const socialActions = {
+  /* ---- people ---- */
+
+  /** Finds someone by public id (for example from /messages?to=COVA-XXXXXX) and caches them. */
+  async lookupUser(publicId: string): Promise<SocialUser | null> {
+    const s = await session();
+    if (!s.ok || !publicId) return null;
+    await resolveUuid(s.value.sb, publicId);
+    return people.get(publicId) ?? null;
+  },
+
+  /**
+   * Searches people on the server and adds them to the cache; `searchUsers` then ranks them.
+   * Call it (debounced) when the search box changes.
+   */
+  async searchPeople(query: string): Promise<void> {
+    const s = await session();
+    if (!s.ok || query.trim().replace(/^@/, "").length < 2) return;
+    const { data, error } = await s.value.sb.rpc("search_profiles", { p_query: query });
+    if (error) return;
+    registerProfiles((data ?? []) as ProfileRow[]);
+    commit({ users: usersSnapshot() });
+  },
+
+  /* ---- friends ---- */
+
+  async sendFriendRequest(me: string, otherId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherId);
+    if (!other) return fail("That person doesn't exist.");
+    if (other === s.value.me) return fail("You can't add yourself.");
+    const { error } = await s.value.sb.rpc("send_friend_request", { p_other: other });
+    if (error) return fail(describe(error));
+    await refresh("friends");
+    return ok(undefined);
+  },
+
+  async respondFriendRequest(me: string, otherId: string, accept: boolean): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherId);
+    if (!other) return fail("No request to answer.");
+    const query = accept
+      ? s.value.sb.from("friendships").update({ status: "accepted" })
+      : s.value.sb.from("friendships").delete();
+    // RLS only lets the person who was asked answer, so any other row matches nothing.
+    const { data, error } = await query
+      .eq("from_id", other)
+      .eq("to_id", s.value.me)
+      .eq("status", "pending")
+      .select("id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("No request to answer.");
+    await refresh("friends");
+    return ok(undefined);
+  },
+
+  /** Cancels a request you sent, or removes an existing friend. */
+  async removeFriendship(me: string, otherId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherId);
+    if (!other) return fail("You are not connected.");
+    const mine = s.value.me;
+    const { data, error } = await s.value.sb
+      .from("friendships")
+      .select("id,from_id,status")
+      .or(`and(from_id.eq.${mine},to_id.eq.${other}),and(from_id.eq.${other},to_id.eq.${mine})`);
+    if (error) return fail(describe(error));
+    const f = (data ?? [])[0] as { id: string; from_id: string; status: string } | undefined;
+    if (!f) return fail("You are not connected.");
+    if (f.status === "pending" && f.from_id !== mine)
+      return fail("Use decline for requests sent to you.");
+    const del = await s.value.sb.from("friendships").delete().eq("id", f.id).select("id");
+    if (del.error) return fail(describe(del.error));
+    await refresh("friends");
+    return ok(undefined);
+  },
+
+  /* ---- direct messages ---- */
+
+  async sendDirectMessage(me: string, otherId: string, text: string): Promise<ActionResult> {
+    void me;
+    const body = text.trim();
+    if (!body) return fail("Write a message first.");
+    if (body.length > LIMITS.text.max)
+      return fail(`Messages can be at most ${LIMITS.text.max} characters.`);
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherId);
+    if (!other) return fail("That person doesn't exist.");
+    if (other === s.value.me) return fail("You can't message yourself.");
+    const { data, error } = await s.value.sb
+      .from("direct_messages")
+      .insert({ to_id: other, body })
+      .select("id,from_id,to_id,body,created_at")
+      .single();
+    if (error || !data) return fail(error ? describe(error) : GENERIC_ERROR);
+    // Show it right away; Realtime then confirms the same row (same id, so nothing doubles).
+    const row = data as MessageRow;
+    const meKey = pub(s.value.me);
+    const threadId = pairKey(meKey, otherId);
+    const at = Date.parse(row.created_at);
+    if (!state.messages.some((m) => m.id === row.id)) {
+      commit({
+        messages: [...state.messages, { id: row.id, threadId, fromId: meKey, text: row.body, at }],
+        reads: { ...state.reads, [`${meKey}:${threadId}`]: at },
+      });
+    }
+    void s.value.sb.rpc("mark_thread_read", { p_other: other });
+    return ok(undefined);
+  },
+
+  /** Marks a conversation as read. Does nothing (and writes nothing) when it already is. */
+  markThreadRead(me: string, otherId: string): void {
+    void me;
+    const meKey = state.meId;
+    if (!meKey) return;
+    const threadId = pairKey(meKey, otherId);
+    const readAt = state.reads[`${meKey}:${threadId}`] ?? 0;
+    const thread = state.messages.filter((m) => m.threadId === threadId);
+    if (!thread.some((m) => m.fromId !== meKey && m.at > readAt)) return;
+    if (markPending.has(threadId)) return;
+    if (Date.now() - (markFailures.get(threadId) ?? 0) < MARK_RETRY_MS) return;
+    markPending.add(threadId);
+
+    const lastAt = thread.reduce((max, m) => Math.max(max, m.at), 0);
+    commit({ reads: { ...state.reads, [`${meKey}:${threadId}`]: Math.max(Date.now(), lastAt) } });
+
+    void (async () => {
+      try {
+        const s = await session();
+        const other = s.ok ? await resolveUuid(s.value.sb, otherId) : null;
+        if (!s.ok || !other) throw new Error("not available");
+        const { error } = await s.value.sb.rpc("mark_thread_read", { p_other: other });
+        if (error) throw new Error(error.message);
+        markFailures.delete(threadId);
+      } catch {
+        markFailures.set(threadId, Date.now());
+        void refresh("messages"); // roll the optimistic mark back to what the server has
+      } finally {
+        markPending.delete(threadId);
+      }
+    })();
+  },
+
+  /* ---- communities: create and edit ---- */
+
+  async createCommunity(me: string, input: CommunityInput): Promise<ActionResult<string>> {
+    void me;
+    const s = await session("Sign in to create a community.");
+    if (!s.ok) return fail(s.error);
+    const fields = validateCommunityFields(input);
+    if (!fields.ok) return fail(fields.error);
+    // owner_id is not sent: the database sets it from the session and rejects anything else.
+    const { data, error } = await s.value.sb
+      .from("communities")
+      .insert({
+        name: fields.value.name,
+        description: fields.value.description,
+        category: input.category || "Other",
+        visibility: input.visibility,
+        posting_policy: input.postingPolicy,
+      })
+      .select("id")
+      .single();
+    if (error || !data) return fail(error ? describe(error) : GENERIC_ERROR);
+    await refresh("communities");
+    return ok((data as { id: string }).id);
+  },
+
+  async updateCommunity(me: string, communityId: string, input: CommunityInput): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const fields = validateCommunityFields(input);
+    if (!fields.ok) return fail(fields.error);
+    const { data, error } = await s.value.sb
+      .from("communities")
+      .update({
+        name: fields.value.name,
+        description: fields.value.description,
+        category: input.category || "Other",
+        visibility: input.visibility,
+        posting_policy: input.postingPolicy,
+      })
+      .eq("id", communityId)
+      .select("id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0)
+      return fail(
+        state.communities[communityId]
+          ? "Only the creator can change these settings."
+          : "Community not found.",
+      );
+    // A private community turning public admits waiting requests (done by a database trigger).
+    await refresh("communities");
+    return ok(undefined);
+  },
+
+  async regenerateJoinCode(me: string, communityId: string): Promise<ActionResult<string>> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { data, error } = await s.value.sb.rpc("regenerate_join_code", { p_community: communityId });
+    if (error || typeof data !== "string") return fail(error ? describe(error) : GENERIC_ERROR);
+    await refresh("communities");
+    return ok(data);
+  },
+
+  async deleteCommunity(me: string, communityId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { data, error } = await s.value.sb
+      .from("communities")
+      .delete()
+      .eq("id", communityId)
+      .select("id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0)
+      return fail(
+        state.communities[communityId]
+          ? "Only the creator can delete this community."
+          : "Community not found.",
+      );
+    await Promise.all([refresh("communities"), refresh("posts")]);
+    return ok(undefined);
+  },
+
+  /* ---- communities: joining ---- */
+
+  /** Joins a public community directly. Private ones need an invite code. */
+  async joinCommunity(me: string, communityId: string): Promise<ActionResult<JoinOutcome>> {
+    void me;
+    const s = await session("Sign in to join a community.");
+    if (!s.ok) return fail(s.error);
+    const c = state.communities[communityId];
+    if (!c) return fail("Community not found.");
+    if (state.meId && roleOf(state, communityId, state.meId))
+      return ok<JoinOutcome>("already-member");
+    const privateMessage = "This community is private. Enter its invite code to ask for access.";
+    if (c.visibility === "private") return fail(privateMessage);
+    const { error } = await s.value.sb.from("community_members").insert({ community_id: communityId });
+    if (error) {
+      if (error.code === "23505") return ok<JoinOutcome>("already-member");
+      return fail(describe(error, privateMessage));
+    }
+    await Promise.all([refresh("communities"), refresh("posts")]);
+    return ok<JoinOutcome>("joined");
+  },
+
+  /**
+   * Uses an invite code. Public communities admit you right away; private ones create a request
+   * that an admin must approve. The code is checked on the server; it is never readable.
+   */
+  async joinByCode(me: string, rawCode: string): Promise<ActionResult<JoinResult>> {
+    void me;
+    const s = await session("Sign in to join a community.");
+    if (!s.ok) return fail(s.error);
+    const code = normalizeCode(rawCode);
+    if (!code) return fail("That code doesn't match any community.");
+    const { data, error } = await s.value.sb.rpc("join_by_code", { p_code: code });
+    if (error || !data) return fail(error ? describe(error) : GENERIC_ERROR);
+    await Promise.all([refresh("communities"), refresh("posts")]);
+    return ok(data as JoinResult);
+  },
+
+  async cancelJoinRequest(me: string, communityId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { data, error } = await s.value.sb
+      .from("join_requests")
+      .delete()
+      .eq("community_id", communityId)
+      .eq("user_id", s.value.me)
+      .select("id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("No pending request.");
+    await refresh("communities");
+    return ok(undefined);
+  },
+
+  async leaveCommunity(me: string, communityId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const role = state.meId ? roleOf(state, communityId, state.meId) : null;
+    if (!role) return fail("You are not a member.");
+    if (role === "owner")
+      return fail("The creator can't leave. Delete the community from its settings instead.");
+    const { data, error } = await s.value.sb
+      .from("community_members")
+      .delete()
+      .eq("community_id", communityId)
+      .eq("user_id", s.value.me)
+      .select("user_id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("You are not a member.");
+    await Promise.all([refresh("communities"), refresh("posts")]);
+    return ok(undefined);
+  },
+
+  /* ---- communities: moderation ---- */
+
+  async decideJoinRequest(me: string, requestId: string, approve: boolean): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { error } = await s.value.sb.rpc("decide_join_request", {
+      p_request: requestId,
+      p_approve: approve,
+    });
+    if (error) return fail(describe(error));
+    await refresh("communities");
+    return ok(undefined);
+  },
+
+  async removeMember(me: string, communityId: string, userId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    // Friendly messages from the cache; the database enforces the same rules either way.
+    const meKey = state.meId ?? "";
+    const myRole = roleOf(state, communityId, meKey);
+    const targetRole = roleOf(state, communityId, userId);
+    if (!isStaff(myRole)) return fail("Only admins can remove members.");
+    if (!targetRole) return fail("That person is not a member.");
+    if (targetRole === "owner") return fail("The creator can't be removed.");
+    if (userId === meKey) return fail("Use Leave to remove yourself.");
+    if (targetRole === "admin" && myRole !== "owner")
+      return fail("Only the creator can remove an admin.");
+    const target = await resolveUuid(s.value.sb, userId);
+    if (!target) return fail("That person is not a member.");
+    const { data, error } = await s.value.sb
+      .from("community_members")
+      .delete()
+      .eq("community_id", communityId)
+      .eq("user_id", target)
+      .select("user_id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("You can't remove that member.");
+    await refresh("communities");
+    return ok(undefined);
+  },
+
+  async setMemberRole(
+    me: string,
+    communityId: string,
+    userId: string,
+    role: "admin" | "member",
+  ): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const meKey = state.meId ?? "";
+    if (roleOf(state, communityId, meKey) !== "owner")
+      return fail("Only the creator can assign admins.");
+    const targetRole = roleOf(state, communityId, userId);
+    if (!targetRole) return fail("That person is not a member.");
+    if (targetRole === "owner") return fail("The creator's role can't change.");
+    const target = await resolveUuid(s.value.sb, userId);
+    if (!target) return fail("That person is not a member.");
+    const { data, error } = await s.value.sb
+      .from("community_members")
+      .update({ role })
+      .eq("community_id", communityId)
+      .eq("user_id", target)
+      .select("user_id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("Only the creator can assign admins.");
+    await refresh("communities");
+    return ok(undefined);
+  },
+
+  /* ---- communities: posts ---- */
+
+  async postToCommunity(me: string, communityId: string, text: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const c = state.communities[communityId];
+    if (!c) return fail("Community not found.");
+    const role = state.meId ? roleOf(state, communityId, state.meId) : null;
+    if (!role) return fail("Join this community to post.");
+    if (!canPost(c, role)) return fail("You don't have permission to post here.");
+    const body = text.trim();
+    if (!body) return fail("Write something first.");
+    if (body.length > LIMITS.text.max)
+      return fail(`Posts can be at most ${LIMITS.text.max} characters.`);
+    const { error } = await s.value.sb
+      .from("community_posts")
+      .insert({ community_id: communityId, body });
+    if (error) return fail(describe(error, "You don't have permission to post here."));
+    await refresh("posts");
+    return ok(undefined);
+  },
+
+  async deletePost(me: string, postId: string): Promise<ActionResult> {
+    void me;
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const post = state.posts.find((p) => p.id === postId);
+    if (!post) return fail("Post not found.");
+    const meKey = state.meId ?? "";
+    const myRole = roleOf(state, post.communityId, meKey);
+    const authorRole = roleOf(state, post.communityId, post.authorId);
+    const allowed =
+      post.authorId === meKey ||
+      myRole === "owner" ||
+      (myRole === "admin" && authorRole !== "owner" && authorRole !== "admin");
+    if (!allowed) return fail("You can't delete this post.");
+    const { data, error } = await s.value.sb
+      .from("community_posts")
+      .delete()
+      .eq("id", postId)
+      .select("id");
+    if (error) return fail(describe(error));
+    if (!data || data.length === 0) return fail("You can't delete this post.");
+    await refresh("posts");
+    return ok(undefined);
+  },
+
+  /**
+   * For a community id that isn't in the cache (a pasted link, or a private community you aren't
+   * in): finds out whether it exists and is private, and if so adds a blank locked entry so the
+   * screen shows "This community is private" instead of "not found". Reveals nothing else.
+   */
+  async probeCommunity(communityId: string): Promise<void> {
+    if (state.communities[communityId] || !UUID_RE.test(communityId)) return;
+    const s = await session();
+    if (!s.ok) return;
+    const { data } = await s.value.sb
+      .from("communities")
+      .select("id")
+      .eq("id", communityId)
+      .maybeSingle();
+    if (data) {
+      await refresh("communities"); // readable but not cached yet
+      return;
+    }
+    const exists = await s.value.sb.rpc("private_community_exists", { p_community: communityId });
+    if (exists.data === true) {
+      lockedCommunities.add(communityId);
+      commit({ communities: { ...state.communities, [communityId]: lockedPlaceholder(communityId) } });
+    }
+  },
+};
+
+
+===== src\lib\demo-store.ts =====
+import { useSyncExternalStore } from "react";
+import type { AssignmentStatus, ChatMessage, DemoSession, UserSettings } from "@/types";
+
+/**
+ * Lightweight DEMO persistence. State lives in this browser's localStorage only.
+ * It is NOT a database, there is no sync between devices or users, and it will be
+ * replaced by real API calls once the backend exists.
+ */
+
+const STORAGE_KEY = "cova-demo-state-v1";
+
+export interface DemoState {
+  session: DemoSession | null;
+  joinedGroups: string[];
+  completedChallenges: string[];
+  enrolledCourses: string[];
+  completedLessons: string[];
+  assignments: Record<string, { status: AssignmentStatus; submission?: string }>;
+  readNotifications: string[];
+  /** Messages sent in this browser, keyed by the other student's id. */
+  chats: Record<string, ChatMessage[]>;
+  readChats: string[];
+  bookmarks: string[];
+  connections: string[];
+  /** Activity that earns leaderboard XP (kept per browser until the backend exists). */
+  voiceMinutes: number;
+  hostedSpaces: number;
+  groupMessages: number;
+  settings: UserSettings;
+}
+
+export const DEFAULT_STATE: DemoState = {
+  session: null,
+  joinedGroups: ["algorithms-circle"],
+  completedChallenges: [],
+  enrolledCourses: ["intro-python", "web-foundations"],
+  completedLessons: ["intro-python-l1", "intro-python-l2", "web-foundations-l1"],
+  assignments: {},
+  readNotifications: [],
+  chats: {},
+  readChats: [],
+  bookmarks: [],
+  connections: ["amara-okafor"],
+  voiceMinutes: 0,
+  hostedSpaces: 0,
+  groupMessages: 0,
+  settings: {
+    displayName: "Sam Rivera",
+    email: "sam.rivera@example.edu",
+    bio: "Curious student learning in public.",
+    emailNotifications: true,
+    messageAlerts: true,
+    weeklyDigest: false,
+    profileVisibility: "everyone",
+  },
+};
+
+let state: DemoState = DEFAULT_STATE;
+let loaded = false;
+const listeners = new Set<() => void>();
+
+function load(): void {
+  if (loaded || typeof window === "undefined") return;
+  loaded = true;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DemoState>;
+      state = {
+        ...DEFAULT_STATE,
+        ...parsed,
+        settings: { ...DEFAULT_STATE.settings, ...parsed.settings },
+      };
+    }
+  } catch {
+    state = DEFAULT_STATE;
+  }
+}
+
+function persist(): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* Storage can be unavailable (private mode, quota). The demo keeps working in memory. */
+  }
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot(): DemoState {
+  load();
+  return state;
+}
+
+function getServerSnapshot(): DemoState {
+  return DEFAULT_STATE;
+}
+
+function update(fn: (s: DemoState) => DemoState): void {
+  load();
+  state = fn(state);
+  persist();
+  listeners.forEach((l) => l());
+}
+
+function toggle(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+}
+
+export function useDemoState(): DemoState {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/** False during server render and hydration, true afterwards. */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
+export const demoActions = {
+  signIn(session: DemoSession) {
+    update((s) => ({
+      ...s,
+      session,
+      settings: { ...s.settings, displayName: session.name, email: session.email },
+    }));
+  },
+  signOut() {
+    update((s) => ({ ...s, session: null }));
+  },
+  toggleGroup(id: string) {
+    update((s) => ({ ...s, joinedGroups: toggle(s.joinedGroups, id) }));
+  },
+  toggleChallenge(id: string) {
+    update((s) => ({ ...s, completedChallenges: toggle(s.completedChallenges, id) }));
+  },
+  toggleEnrollment(id: string) {
+    update((s) => ({ ...s, enrolledCourses: toggle(s.enrolledCourses, id) }));
+  },
+  toggleLesson(id: string) {
+    update((s) => ({ ...s, completedLessons: toggle(s.completedLessons, id) }));
+  },
+  setAssignment(id: string, status: AssignmentStatus, submission?: string) {
+    update((s) => ({ ...s, assignments: { ...s.assignments, [id]: { status, submission } } }));
+  },
+  markNotificationRead(id: string) {
+    update((s) => ({
+      ...s,
+      readNotifications: s.readNotifications.includes(id)
+        ? s.readNotifications
+        : [...s.readNotifications, id],
+    }));
+  },
+  markAllNotificationsRead(ids: string[]) {
+    update((s) => ({
+      ...s,
+      readNotifications: Array.from(new Set([...s.readNotifications, ...ids])),
+    }));
+  },
+  sendMessage(participantId: string, text: string) {
+    const message: ChatMessage = { id: `local-${Date.now()}`, from: "me", text, time: "Just now" };
+    update((s) => ({
+      ...s,
+      chats: { ...s.chats, [participantId]: [...(s.chats[participantId] ?? []), message] },
+    }));
+  },
+  markChatRead(participantId: string) {
+    update((s) =>
+      s.readChats.includes(participantId)
+        ? s
+        : { ...s, readChats: [...s.readChats, participantId] },
+    );
+  },
+  toggleBookmark(id: string) {
+    update((s) => ({ ...s, bookmarks: toggle(s.bookmarks, id) }));
+  },
+  toggleConnection(id: string) {
+    update((s) => ({ ...s, connections: toggle(s.connections, id) }));
+  },
+  addVoiceMinute() {
+    update((s) => ({ ...s, voiceMinutes: s.voiceMinutes + 1 }));
+  },
+  addHostedSpace() {
+    update((s) => ({ ...s, hostedSpaces: s.hostedSpaces + 1 }));
+  },
+  addGroupMessage() {
+    update((s) => ({ ...s, groupMessages: s.groupMessages + 1 }));
+  },
+  saveSettings(settings: UserSettings) {
+    update((s) => ({ ...s, settings }));
+  },
+  reset() {
+    update(() => DEFAULT_STATE);
+  },
+};
+
+
+===== src\types\social.ts =====
+import type { Tone } from "@/types";
+
+/**
+ * Types for the Connect section: people, friendships, private messages and communities.
+ * They mirror the Supabase tables (supabase/migrations). Every `*Id` field here is the PUBLIC id
+ * of a person (COVA-XXXXXX) so the UI never sees auth user ids; src/lib/social-store.ts maps
+ * between the two.
+ */
+
+export interface SocialUser {
+  /** Public, unique ID. People can be found by it (for example "COVA-7K3Q9X"). */
+  id: string;
+  /** Only filled in for the signed-in person. Other people's emails are never loaded. */
+  email: string;
+  displayName: string;
+  headline: string;
+  tone: Tone;
+  createdAt: number;
+  /** True for the seeded sample students. They never answer messages. */
+  sample: boolean;
+}
+
+export type FriendshipStatus = "pending" | "accepted";
+
+export interface Friendship {
+  /** Always the sorted pair of user IDs joined with "|". */
+  id: string;
+  /** Who sent the request. */
+  fromId: string;
+  toId: string;
+  status: FriendshipStatus;
+  createdAt: number;
+}
+
+export interface DirectMessage {
+  id: string;
+  /** Sorted pair of user IDs joined with "|". */
+  threadId: string;
+  fromId: string;
+  text: string;
+  at: number;
+}
+
+export type CommunityVisibility = "public" | "private";
+/** Who may publish posts: every member, owner and admins, or the owner alone. */
+export type PostingPolicy = "everyone" | "admins" | "owner";
+export type CommunityRole = "owner" | "admin" | "member";
+
+export interface Community {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  visibility: CommunityVisibility;
+  postingPolicy: PostingPolicy;
+  /**
+   * Invite code. Private communities are joined by code or link, then approved by an admin.
+   * Only the owner and admins receive it; everyone else sees "".
+   */
+  joinCode: string;
+  ownerId: string;
+  createdAt: number;
+}
+
+export interface CommunityMember {
+  communityId: string;
+  userId: string;
+  role: CommunityRole;
+  joinedAt: number;
+}
+
+export interface JoinRequest {
+  id: string;
+  communityId: string;
+  userId: string;
+  createdAt: number;
+}
+
+export interface CommunityPost {
+  id: string;
+  communityId: string;
+  authorId: string;
+  text: string;
+  at: number;
+}
+
+export interface SocialState {
+  /** Public id of the signed-in person, or null when signed out. */
+  meId: string | null;
+  /** False until the first load after sign-in has finished (lists are empty until then). */
+  ready: boolean;
+  /** People known to this browser (friends, chat partners, members, search results). */
+  users: Record<string, SocialUser>;
+  friendships: Record<string, Friendship>;
+  messages: DirectMessage[];
+  /** `${userId}:${threadId}` -> time the thread was last read by that user. */
+  reads: Record<string, number>;
+  communities: Record<string, Community>;
+  members: CommunityMember[];
+  requests: JoinRequest[];
+  posts: CommunityPost[];
+}
+
+export type ActionResult<T = undefined> = { ok: true; value: T } | { ok: false; error: string };
+
+export type JoinOutcome = "joined" | "requested" | "already-member" | "already-requested";
+
+
+===== src\app\(app)\community\page.tsx =====
+import type { Metadata } from "next";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { CommunityBrowser } from "@/components/community/CommunityBrowser";
+
+export const metadata: Metadata = { title: "Community" };
+
+export default function CommunityPage() {
+  return (
+    <>
+      <PageHeader
+        title="Community"
+        description="Find students with similar goals, skills and interests. Profiles shown here are sample data."
+      />
+      <CommunityBrowser />
+    </>
+  );
+}
+
+
+===== src\app\(app)\messages\page.tsx =====
+import type { Metadata } from "next";
+import { Suspense } from "react";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { MessagesClient } from "@/components/messages/MessagesClient";
+
+export const metadata: Metadata = { title: "Messages" };
+
+export default function MessagesPage() {
+  return (
+    <>
+      <PageHeader title="Messages" description="Private conversations with other students." />
+      <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+        <MessagesClient />
+      </Suspense>
+    </>
+  );
+}
+
+
+===== src\app\(app)\layout.tsx =====
+import type { ReactNode } from "react";
+import { AppShell } from "@/components/layout/AppShell";
+
+export default function AppLayout({ children }: { children: ReactNode }) {
+  return <AppShell>{children}</AppShell>;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\lib\supabase\client.ts =====
+import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+let client: SupabaseClient | null = null;
+
+/**
+ * The browser Supabase client (one per tab). Only call it from the browser: event handlers,
+ * effects, or store subscriptions, never while rendering on the server.
+ *
+ * It uses the public anon key. Everything it can do is limited by Row Level Security, so this
+ * key is safe to ship. Never put the service-role key in a NEXT_PUBLIC_ variable.
+ */
+export function getSupabase(): SupabaseClient {
+  if (client) return client;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (see .env.example).",
+    );
+  }
+  client = createBrowserClient(url, key);
+  return client;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\supabase\migrations\20261012000001_social_schema.sql =====
+-- COVA Connect: schema (profiles, friendships, direct messages, communities).
+-- Row Level Security, policies and RPCs live in the next migration.
+--
+-- Conventions
+--   * Every user id column is the auth user id (auth.uid()). Clients never send it:
+--     the columns default to auth.uid() and column-level grants stop clients from setting them.
+--   * "public id" (COVA-XXXXXX) is the human-friendly handle people search for. It is NOT a key.
+
+------------------------------------------------------------------------ id generators
+
+create or replace function public.random_code(p_length int)
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  -- No 0/O/1/I so codes are easy to read aloud. Same alphabet as the old client store.
+  alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  bytes bytea;
+  result text := '';
+  i int;
+begin
+  bytes := decode(replace(gen_random_uuid()::text, '-', ''), 'hex'); -- 16 random bytes
+  for i in 0 .. p_length - 1 loop
+    result := result || substr(alphabet, (get_byte(bytes, i) % 32) + 1, 1);
+  end loop;
+  return result;
+end;
+$$;
+
+------------------------------------------------------------------------ profiles
+
+create table public.profiles (
+  -- For real people this equals auth.users.id (set by the signup trigger below).
+  -- Sample students are seeded rows with is_sample = true and no auth user.
+  id           uuid primary key default gen_random_uuid(),
+  public_id    text not null unique,
+  display_name text not null default 'Student'
+                 check (char_length(btrim(display_name)) between 1 and 60),
+  headline     text not null default '' check (char_length(headline) <= 160),
+  tone         text not null default 'soft' check (tone in ('pale', 'soft', 'muted')),
+  is_sample    boolean not null default false,
+  created_at   timestamptz not null default now(),
+  constraint profiles_public_id_format
+    check (is_sample or public_id ~ '^COVA-[A-HJ-NP-Z2-9]{6}$')
+);
+
+create index profiles_display_name_idx on public.profiles (lower(display_name));
+
+create or replace function public.generate_public_id()
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  candidate text;
+begin
+  loop
+    candidate := 'COVA-' || public.random_code(6);
+    exit when not exists (select 1 from public.profiles where public_id = candidate);
+  end loop;
+  return candidate;
+end;
+$$;
+
+alter table public.profiles alter column public_id set default public.generate_public_id();
+
+-- A profile is created for every new auth user. SECURITY DEFINER because the new user has no
+-- INSERT right on profiles (and must not have one).
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.profiles (id, display_name, tone)
+  values (
+    new.id,
+    left(
+      coalesce(
+        nullif(btrim(new.raw_user_meta_data ->> 'display_name'), ''),
+        nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+        'Student'
+      ),
+      60
+    ),
+    (array['pale', 'soft', 'muted'])[1 + floor(random() * 3)::int]
+  );
+  return new;
+end;
+$$;
+
+create or replace function public.handle_deleted_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.profiles where id = old.id and not is_sample;
+  return old;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+create trigger on_auth_user_deleted
+  after delete on auth.users
+  for each row execute function public.handle_deleted_user();
+
+------------------------------------------------------------------------ friendships
+
+create table public.friendships (
+  id         uuid primary key default gen_random_uuid(),
+  from_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  to_id      uuid not null references public.profiles (id) on delete cascade,
+  status     text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at timestamptz not null default now(),
+  constraint friendships_not_self check (from_id <> to_id)
+);
+
+-- One row per pair, whoever asked first.
+create unique index friendships_pair_idx
+  on public.friendships (least(from_id, to_id), greatest(from_id, to_id));
+create index friendships_to_idx on public.friendships (to_id);
+
+------------------------------------------------------------------------ direct messages
+
+create table public.direct_messages (
+  id         uuid primary key default gen_random_uuid(),
+  from_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  to_id      uuid not null references public.profiles (id) on delete cascade,
+  body       text not null check (char_length(btrim(body)) between 1 and 2000),
+  created_at timestamptz not null default now(),
+  constraint direct_messages_not_self check (from_id <> to_id)
+);
+
+create index direct_messages_from_idx on public.direct_messages (from_id, created_at desc);
+create index direct_messages_to_idx on public.direct_messages (to_id, created_at desc);
+
+-- When `user_id` last opened the conversation with `other_id`.
+create table public.message_reads (
+  user_id  uuid not null references public.profiles (id) on delete cascade,
+  other_id uuid not null references public.profiles (id) on delete cascade,
+  read_at  timestamptz not null default now(),
+  primary key (user_id, other_id)
+);
+
+------------------------------------------------------------------------ communities
+
+create table public.communities (
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null check (char_length(btrim(name)) between 3 and 60),
+  description    text not null check (char_length(btrim(description)) between 10 and 500),
+  category       text not null default 'Other' check (char_length(category) between 1 and 40),
+  visibility     text not null default 'public' check (visibility in ('public', 'private')),
+  posting_policy text not null default 'everyone'
+                   check (posting_policy in ('everyone', 'admins', 'owner')),
+  owner_id       uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at     timestamptz not null default now()
+);
+
+create index communities_owner_idx on public.communities (owner_id);
+
+-- The invite code lives in its own table. A column can't be hidden row by row with RLS, and
+-- column-level REVOKEs break `select *` and Realtime on communities. Here the code is only
+-- readable by the community's staff, and only changeable through regenerate_join_code().
+create table public.community_join_codes (
+  community_id uuid primary key references public.communities (id) on delete cascade,
+  code         text not null unique check (code ~ '^[A-HJ-NP-Z2-9]{8}$')
+);
+
+create or replace function public.generate_join_code()
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  candidate text;
+begin
+  loop
+    candidate := public.random_code(8);
+    exit when not exists (select 1 from public.community_join_codes where code = candidate);
+  end loop;
+  return candidate;
+end;
+$$;
+
+alter table public.community_join_codes alter column code set default public.generate_join_code();
+
+create table public.community_members (
+  community_id uuid not null references public.communities (id) on delete cascade,
+  user_id      uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  role         text not null default 'member' check (role in ('owner', 'admin', 'member')),
+  joined_at    timestamptz not null default now(),
+  primary key (community_id, user_id)
+);
+
+create index community_members_user_idx on public.community_members (user_id);
+-- Exactly one owner per community.
+create unique index community_members_one_owner_idx
+  on public.community_members (community_id) where role = 'owner';
+
+create table public.join_requests (
+  id           uuid primary key default gen_random_uuid(),
+  community_id uuid not null references public.communities (id) on delete cascade,
+  user_id      uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  unique (community_id, user_id)
+);
+
+create index join_requests_user_idx on public.join_requests (user_id);
+
+create table public.community_posts (
+  id           uuid primary key default gen_random_uuid(),
+  community_id uuid not null references public.communities (id) on delete cascade,
+  author_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  body         text not null check (char_length(btrim(body)) between 1 and 2000),
+  created_at   timestamptz not null default now()
+);
+
+create index community_posts_feed_idx on public.community_posts (community_id, created_at desc);
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\supabase\migrations\20261012000002_social_rls_and_rpc.sql =====
+-- COVA Connect: Row Level Security, helper functions, RPCs and Realtime.
+--
+-- These rules mirror socialActions in src/lib/social-store.ts:
+--   * only the owner assigns admins, edits/deletes the community and regenerates the code;
+--   * owner + admins approve join requests and remove members (admins only plain members);
+--   * posting follows posting_policy;
+--   * private communities are readable only by members (plus people with a pending request,
+--     who need the name to see "Request waiting"), and join codes are readable only by staff
+--     and only usable through join_by_code().
+--
+-- Two layers protect every write: RLS policies + column-level GRANTs (what a client can touch
+-- directly) and SECURITY DEFINER functions (multi-step actions). User ids always come from
+-- auth.uid(), never from a parameter.
+
+------------------------------------------------------------------------ helper functions
+-- SECURITY DEFINER so policies can look at membership without recursing into RLS.
+
+create or replace function public.role_of(p_community uuid, p_user uuid)
+returns text
+language sql stable security definer
+set search_path = ''
+as $$
+  select role from public.community_members where community_id = p_community and user_id = p_user
+$$;
+
+create or replace function public.my_role(p_community uuid)
+returns text
+language sql stable security definer
+set search_path = ''
+as $$
+  select role from public.community_members
+  where community_id = p_community and user_id = auth.uid()
+$$;
+
+create or replace function public.is_member(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.community_members
+    where community_id = p_community and user_id = auth.uid()
+  )
+$$;
+
+create or replace function public.is_staff(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select coalesce(public.my_role(p_community) in ('owner', 'admin'), false)
+$$;
+
+create or replace function public.is_owner(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select coalesce(public.my_role(p_community) = 'owner', false)
+$$;
+
+create or replace function public.is_public_community(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.communities where id = p_community and visibility = 'public')
+$$;
+
+create or replace function public.has_pending_request(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.join_requests
+    where community_id = p_community and user_id = auth.uid()
+  )
+$$;
+
+-- Mirrors canPost() in the store.
+create or replace function public.can_post(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.communities c
+    join public.community_members m on m.community_id = c.id and m.user_id = auth.uid()
+    where c.id = p_community
+      and (
+        c.posting_policy = 'everyone'
+        or (c.posting_policy = 'admins' and m.role in ('owner', 'admin'))
+        or (c.posting_policy = 'owner' and m.role = 'owner')
+      )
+  )
+$$;
+
+------------------------------------------------------------------------ community triggers
+
+-- The creator becomes the owner and the community gets its invite code.
+create or replace function public.on_community_created()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  insert into public.community_members (community_id, user_id, role)
+  values (new.id, new.owner_id, 'owner');
+  insert into public.community_join_codes (community_id) values (new.id);
+  return new;
+end;
+$$;
+
+create trigger communities_after_insert
+  after insert on public.communities
+  for each row execute function public.on_community_created();
+
+-- A private community turning public admits everyone who was waiting (same as the old store).
+create or replace function public.on_community_visibility_changed()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if old.visibility = 'private' and new.visibility = 'public' then
+    insert into public.community_members (community_id, user_id, role)
+    select community_id, user_id, 'member'
+    from public.join_requests
+    where community_id = new.id
+    on conflict do nothing;
+    delete from public.join_requests where community_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger communities_after_visibility_change
+  after update of visibility on public.communities
+  for each row
+  when (old.visibility is distinct from new.visibility)
+  execute function public.on_community_visibility_changed();
+
+------------------------------------------------------------------------ RLS on
+
+alter table public.profiles              enable row level security;
+alter table public.friendships           enable row level security;
+alter table public.direct_messages       enable row level security;
+alter table public.message_reads         enable row level security;
+alter table public.communities           enable row level security;
+alter table public.community_join_codes  enable row level security;
+alter table public.community_members     enable row level security;
+alter table public.join_requests         enable row level security;
+alter table public.community_posts       enable row level security;
+
+-- Start from nothing; grant only what each table needs. Column lists below are what stop a
+-- client from setting from_id / owner_id / role / status on its own.
+revoke all on public.profiles, public.friendships, public.direct_messages,
+  public.message_reads, public.communities, public.community_join_codes,
+  public.community_members, public.join_requests, public.community_posts
+  from public, anon, authenticated;
+
+------------------------------------------------------------------------ profiles
+-- Everyone signed in can find people by name or COVA id (that is the product), but only the
+-- owner can edit their own display fields. public_id and is_sample can never be changed.
+
+grant select on public.profiles to authenticated;
+grant update (display_name, headline, tone) on public.profiles to authenticated;
+
+create policy profiles_select on public.profiles
+  for select to authenticated using (true);
+
+create policy profiles_update_own on public.profiles
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+------------------------------------------------------------------------ friendships
+
+grant select, delete on public.friendships to authenticated;
+grant insert (to_id) on public.friendships to authenticated;
+grant update (status) on public.friendships to authenticated;
+
+create policy friendships_select on public.friendships
+  for select to authenticated
+  using (auth.uid() in (from_id, to_id));
+
+-- You can only ask on your own behalf, and always as "pending".
+create policy friendships_insert on public.friendships
+  for insert to authenticated
+  with check (from_id = auth.uid() and status = 'pending');
+
+-- Only the person who was asked can accept.
+create policy friendships_accept on public.friendships
+  for update to authenticated
+  using (to_id = auth.uid() and status = 'pending')
+  with check (to_id = auth.uid() and status = 'accepted');
+
+-- Cancel a request you sent, decline one you received, or remove a friend.
+create policy friendships_delete on public.friendships
+  for delete to authenticated
+  using (auth.uid() in (from_id, to_id));
+
+------------------------------------------------------------------------ direct messages
+-- Messages can't be edited or deleted: there is no UPDATE/DELETE grant or policy.
+
+grant select on public.direct_messages to authenticated;
+grant insert (to_id, body) on public.direct_messages to authenticated;
+
+create policy direct_messages_select on public.direct_messages
+  for select to authenticated
+  using (auth.uid() in (from_id, to_id));
+
+create policy direct_messages_insert on public.direct_messages
+  for insert to authenticated
+  with check (from_id = auth.uid());
+
+-- Read markers are written only by mark_thread_read() so the timestamp comes from the server.
+grant select on public.message_reads to authenticated;
+
+create policy message_reads_select on public.message_reads
+  for select to authenticated
+  using (user_id = auth.uid());
+
+------------------------------------------------------------------------ communities
+
+grant select, delete on public.communities to authenticated;
+grant insert (name, description, category, visibility, posting_policy)
+  on public.communities to authenticated;
+grant update (name, description, category, visibility, posting_policy)
+  on public.communities to authenticated;
+
+create policy communities_select on public.communities
+  for select to authenticated
+  using (
+    visibility = 'public'
+    or owner_id = auth.uid()                -- needed so INSERT ... RETURNING works
+    or public.is_member(id)
+    or public.has_pending_request(id)
+  );
+
+create policy communities_insert on public.communities
+  for insert to authenticated
+  with check (owner_id = auth.uid());
+
+create policy communities_update_owner on public.communities
+  for update to authenticated
+  using (owner_id = auth.uid())
+  with check (owner_id = auth.uid());
+
+create policy communities_delete_owner on public.communities
+  for delete to authenticated
+  using (owner_id = auth.uid());
+
+-- Invite codes: staff may read them. Nobody writes them directly.
+grant select on public.community_join_codes to authenticated;
+
+create policy join_codes_select_staff on public.community_join_codes
+  for select to authenticated
+  using (public.is_staff(community_id));
+
+------------------------------------------------------------------------ members
+
+grant select, delete on public.community_members to authenticated;
+grant insert (community_id) on public.community_members to authenticated;
+grant update (role) on public.community_members to authenticated;
+
+create policy members_select on public.community_members
+  for select to authenticated
+  using (public.is_public_community(community_id) or public.is_member(community_id));
+
+-- Joining directly is only for public communities, always as a plain member.
+create policy members_insert_public on public.community_members
+  for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and role = 'member'
+    and public.is_public_community(community_id)
+  );
+
+-- Only the owner assigns admins. The owner's own row never changes.
+create policy members_update_owner on public.community_members
+  for update to authenticated
+  using (role <> 'owner' and public.is_owner(community_id))
+  with check (role in ('admin', 'member') and public.is_owner(community_id));
+
+create policy members_delete on public.community_members
+  for delete to authenticated
+  using (
+    -- leave (the owner can't)
+    (user_id = auth.uid() and role <> 'owner')
+    -- owner and admins remove plain members
+    or (user_id <> auth.uid() and role = 'member' and public.is_staff(community_id))
+    -- only the owner removes an admin
+    or (user_id <> auth.uid() and role = 'admin' and public.is_owner(community_id))
+  );
+
+------------------------------------------------------------------------ join requests
+-- Requests are created only by join_by_code(): you need the code to ask.
+
+grant select, delete on public.join_requests to authenticated;
+
+create policy join_requests_select on public.join_requests
+  for select to authenticated
+  using (user_id = auth.uid() or public.is_staff(community_id));
+
+-- Cancel your own request. Staff answer requests through decide_join_request().
+create policy join_requests_cancel_own on public.join_requests
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+------------------------------------------------------------------------ posts
+
+grant select, delete on public.community_posts to authenticated;
+grant insert (community_id, body) on public.community_posts to authenticated;
+
+create policy posts_select on public.community_posts
+  for select to authenticated
+  using (public.is_public_community(community_id) or public.is_member(community_id));
+
+create policy posts_insert on public.community_posts
+  for insert to authenticated
+  with check (author_id = auth.uid() and public.can_post(community_id));
+
+-- Author, owner, or an admin (but an admin can't delete the owner's or another admin's posts).
+create policy posts_delete on public.community_posts
+  for delete to authenticated
+  using (
+    author_id = auth.uid()
+    or public.is_owner(community_id)
+    or (
+      public.my_role(community_id) = 'admin'
+      and coalesce(public.role_of(community_id, author_id), 'member') = 'member'
+    )
+  );
+
+------------------------------------------------------------------------ RPC: friends
+
+create or replace function public.send_friend_request(p_other uuid)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  f public.friendships;
+begin
+  if me is null then raise exception 'Sign in first.'; end if;
+  if me = p_other then raise exception 'You can''t add yourself.'; end if;
+  if not exists (select 1 from public.profiles where id = p_other) then
+    raise exception 'That person doesn''t exist.';
+  end if;
+
+  select * into f from public.friendships
+  where least(from_id, to_id) = least(me, p_other)
+    and greatest(from_id, to_id) = greatest(me, p_other);
+
+  if found then
+    if f.status = 'accepted' then raise exception 'You are already friends.'; end if;
+    if f.from_id = me then raise exception 'Request already sent.'; end if;
+    update public.friendships set status = 'accepted' where id = f.id; -- they had asked you
+    return;
+  end if;
+
+  insert into public.friendships (from_id, to_id) values (me, p_other);
+exception when unique_violation then
+  raise exception 'Request already sent.';
+end;
+$$;
+
+------------------------------------------------------------------------ RPC: messages
+
+create or replace function public.mark_thread_read(p_other uuid)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in first.'; end if;
+  insert into public.message_reads (user_id, other_id, read_at)
+  values (auth.uid(), p_other, clock_timestamp())
+  on conflict (user_id, other_id) do update set read_at = excluded.read_at;
+end;
+$$;
+
+------------------------------------------------------------------------ RPC: people
+
+-- Finds people by display name or COVA id: case-insensitive, partial, 2+ characters, best
+-- matches first. SECURITY INVOKER, so it only ever sees what profiles_select allows.
+create or replace function public.search_profiles(p_query text)
+returns setof public.profiles
+language sql stable
+set search_path = ''
+as $$
+  with q as (
+    select lower(regexp_replace(btrim(coalesce(p_query, '')), '^@', '')) as term
+  ),
+  esc as (
+    select term,
+           replace(replace(replace(term, '\', '\\'), '%', '\%'), '_', '\_') as pattern
+    from q
+  )
+  select p.*
+  from public.profiles p, esc
+  where char_length(esc.term) >= 2
+    and p.id <> coalesce(auth.uid(), '00000000-0000-0000-0000-000000000000'::uuid)
+    and (
+      lower(p.display_name) like '%' || esc.pattern || '%' escape '\'
+      or lower(p.public_id) like '%' || esc.pattern || '%' escape '\'
+    )
+  order by
+    case
+      when lower(p.public_id) = esc.term then 0
+      when lower(p.display_name) = esc.term then 1
+      when lower(p.display_name) like esc.pattern || '%' escape '\'
+        or lower(p.public_id) like esc.pattern || '%' escape '\' then 2
+      else 3
+    end,
+    p.display_name
+  limit 30
+$$;
+
+------------------------------------------------------------------------ RPC: communities
+
+-- Uses an invite code. Public communities admit you at once; private ones file a request.
+-- This is the only way to learn which community a code belongs to.
+create or replace function public.join_by_code(p_code text)
+returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  normalized text := upper(regexp_replace(coalesce(p_code, ''), '[\s-]', '', 'g'));
+  c public.communities;
+begin
+  if me is null then raise exception 'Sign in to join a community.'; end if;
+
+  select c2.* into c
+  from public.community_join_codes jc
+  join public.communities c2 on c2.id = jc.community_id
+  where normalized <> '' and jc.code = normalized;
+
+  if not found then raise exception 'That code doesn''t match any community.'; end if;
+
+  if exists (select 1 from public.community_members where community_id = c.id and user_id = me) then
+    return jsonb_build_object('communityId', c.id, 'outcome', 'already-member');
+  end if;
+
+  if c.visibility = 'public' then
+    insert into public.community_members (community_id, user_id, role)
+    values (c.id, me, 'member')
+    on conflict do nothing;
+    return jsonb_build_object('communityId', c.id, 'outcome', 'joined');
+  end if;
+
+  if exists (select 1 from public.join_requests where community_id = c.id and user_id = me) then
+    return jsonb_build_object('communityId', c.id, 'outcome', 'already-requested');
+  end if;
+
+  insert into public.join_requests (community_id, user_id) values (c.id, me)
+  on conflict do nothing;
+  return jsonb_build_object('communityId', c.id, 'outcome', 'requested');
+end;
+$$;
+
+-- Owner and admins answer requests.
+create or replace function public.decide_join_request(p_request uuid, p_approve boolean)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  r public.join_requests;
+begin
+  select * into r from public.join_requests where id = p_request;
+  if not found then raise exception 'That request no longer exists.'; end if;
+  if not public.is_staff(r.community_id) then
+    raise exception 'Only admins can answer join requests.';
+  end if;
+
+  if p_approve then
+    insert into public.community_members (community_id, user_id, role)
+    values (r.community_id, r.user_id, 'member')
+    on conflict do nothing;
+  end if;
+  delete from public.join_requests where id = p_request;
+end;
+$$;
+
+-- Owner only. The old code stops working immediately.
+create or replace function public.regenerate_join_code(p_community uuid)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  new_code text;
+begin
+  if not exists (select 1 from public.communities where id = p_community) then
+    raise exception 'Community not found.';
+  end if;
+  if not public.is_owner(p_community) then
+    raise exception 'Only the creator can change the invite code.';
+  end if;
+  new_code := public.generate_join_code();
+  update public.community_join_codes set code = new_code where community_id = p_community;
+  return new_code;
+end;
+$$;
+
+-- Lets the UI tell "private, ask for the code" apart from "doesn't exist" without revealing
+-- anything else about a private community.
+create or replace function public.private_community_exists(p_community uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select auth.uid() is not null
+     and exists (select 1 from public.communities where id = p_community and visibility = 'private')
+$$;
+
+------------------------------------------------------------------------ function privileges
+-- Functions are executable by PUBLIC by default. Only signed-in users may call them.
+
+revoke execute on function
+  public.role_of(uuid, uuid), public.my_role(uuid), public.is_member(uuid), public.is_staff(uuid),
+  public.is_owner(uuid), public.is_public_community(uuid), public.has_pending_request(uuid),
+  public.can_post(uuid), public.send_friend_request(uuid), public.mark_thread_read(uuid),
+  public.search_profiles(text), public.join_by_code(text),
+  public.decide_join_request(uuid, boolean), public.regenerate_join_code(uuid),
+  public.private_community_exists(uuid)
+  from public, anon;
+
+grant execute on function
+  public.role_of(uuid, uuid), public.my_role(uuid), public.is_member(uuid), public.is_staff(uuid),
+  public.is_owner(uuid), public.is_public_community(uuid), public.has_pending_request(uuid),
+  public.can_post(uuid), public.send_friend_request(uuid), public.mark_thread_read(uuid),
+  public.search_profiles(text), public.join_by_code(text),
+  public.decide_join_request(uuid, boolean), public.regenerate_join_code(uuid),
+  public.private_community_exists(uuid)
+  to authenticated;
+
+-- Internal helpers and triggers are never called by clients.
+revoke execute on function
+  public.random_code(int), public.generate_public_id(), public.generate_join_code(),
+  public.handle_new_user(), public.handle_deleted_user(),
+  public.on_community_created(), public.on_community_visibility_changed()
+  from public, anon, authenticated;
+
+------------------------------------------------------------------------ Realtime
+-- Realtime postgres_changes respects the SELECT policies above for inserts and updates.
+-- (DELETE events only carry primary keys and are not filtered, so the client just refetches.)
+
+do $$
+declare
+  t text;
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    foreach t in array array[
+      'profiles', 'friendships', 'direct_messages', 'message_reads', 'communities',
+      'community_join_codes', 'community_members', 'join_requests', 'community_posts'
+    ] loop
+      if not exists (
+        select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+      ) then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+    end loop;
+  end if;
+end;
+$$;
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\supabase\tests\00_mock_supabase.sql =====
+-- Minimal stand-in for the parts of Supabase the migrations rely on.
+do $$ begin create role anon nologin; exception when duplicate_object then null; end $$;
+do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$;
+create schema auth;
+create table auth.users (
+  id uuid primary key default gen_random_uuid(),
+  email text,
+  raw_user_meta_data jsonb not null default '{}'
+);
+create function auth.uid() returns uuid language sql stable as $$
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid
+$$;
+grant usage on schema auth to anon, authenticated;
+grant usage on schema public to anon, authenticated;
+create publication supabase_realtime;
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\supabase\tests\10_rls_tests.sql =====
+\set ON_ERROR_STOP off
+\pset format unaligned
+\pset tuples_only on
+
+create schema t;
+create table t.results (label text, ok boolean, detail text);
+create table t.ctx (k text primary key, v text);
+grant usage on schema t to authenticated, anon;
+grant all on t.results, t.ctx to authenticated, anon;
+
+-- run sql as current role; expect: 'ok' (no error), 'error' (any error), or 'rows=N' (rows affected / returned)
+create function t.check(label text, stmt text, expect text) returns void language plpgsql as $$
+declare n bigint; err text; passed boolean; detail text;
+begin
+  begin
+    execute stmt;
+    get diagnostics n = row_count;
+    detail := 'ok rows=' || n;
+    passed := case when expect = 'ok' then true
+                   when expect = 'error' then false
+                   when expect like 'rows=%' then n = substr(expect,6)::bigint end;
+  exception when others then
+    err := sqlerrm; detail := 'error: ' || err;
+    passed := (expect = 'error');
+  end;
+  insert into t.results values (label, passed, detail || ' (expected ' || expect || ')');
+end $$;
+grant execute on function t.check(text,text,text) to authenticated, anon;
+
+-- scalar helper: store the result of a query for later use
+create function t.keep(p_key text, p_stmt text) returns void language plpgsql as $$
+declare val text;
+begin execute p_stmt into val; insert into t.ctx (k, v) values (p_key, val) on conflict (k) do update set v = excluded.v; end $$;
+grant execute on function t.keep(text,text) to authenticated;
+
+create function t.as_user(u uuid) returns void language plpgsql as $$ begin
+  perform set_config('request.jwt.claim.sub', u::text, false);
+end $$;
+
+insert into auth.users (id, email, raw_user_meta_data) values
+ ('00000000-0000-0000-0000-00000000000a','alice@x.edu','{"display_name":"Alice Owner"}'),
+ ('00000000-0000-0000-0000-00000000000b','bob@x.edu','{"display_name":"Bob Admin"}'),
+ ('00000000-0000-0000-0000-00000000000c','carol@x.edu','{}'),
+ ('00000000-0000-0000-0000-00000000000d','dave@x.edu','{"display_name":"Dave Outsider"}'),
+ ('00000000-0000-0000-0000-00000000000e','erin@x.edu','{"display_name":"Erin Outsider"}');
+
+select t.check('signup trigger created 5 profiles', 'select 1 from public.profiles having count(*)=5', 'rows=1');
+select t.check('public ids match COVA-XXXXXX', $$select 1 from public.profiles where public_id !~ '^COVA-[A-HJ-NP-Z2-9]{6}$'$$, 'rows=0');
+select t.check('display name falls back to email local part', $$select 1 from public.profiles where display_name='carol'$$, 'rows=1');
+
+grant usage on schema auth to authenticated;
+set role authenticated;
+-- ================= PROFILES =================
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('profiles: user can read others', $$select * from public.profiles$$, 'rows=5');
+select t.check('profiles: update own display_name', $$update public.profiles set display_name='Alice O' where id=auth.uid()$$, 'rows=1');
+select t.check('profiles: cannot update someone else', $$update public.profiles set display_name='Hax' where id='00000000-0000-0000-0000-00000000000b'$$, 'rows=0');
+select t.check('profiles: cannot change public_id', $$update public.profiles set public_id='COVA-AAAAAA' where id=auth.uid()$$, 'error');
+select t.check('profiles: cannot insert profile', $$insert into public.profiles (id, display_name) values (gen_random_uuid(),'x')$$, 'error');
+select t.check('profiles: cannot delete profile', $$delete from public.profiles where id=auth.uid()$$, 'error');
+
+-- ================= FRIENDS =================
+select t.check('friends: alice -> bob request', $$select public.send_friend_request('00000000-0000-0000-0000-00000000000b')$$, 'ok');
+select t.check('friends: duplicate request rejected', $$select public.send_friend_request('00000000-0000-0000-0000-00000000000b')$$, 'error');
+select t.check('friends: cannot add self', $$select public.send_friend_request(auth.uid())$$, 'error');
+select t.check('friends: unknown person rejected', $$select public.send_friend_request(gen_random_uuid())$$, 'error');
+select t.check('friends: cannot forge from_id', $$insert into public.friendships (from_id,to_id) values ('00000000-0000-0000-0000-00000000000c','00000000-0000-0000-0000-00000000000d')$$, 'error');
+select t.check('friends: cannot insert as accepted', $$insert into public.friendships (to_id,status) values ('00000000-0000-0000-0000-00000000000c','accepted')$$, 'error');
+select t.check('friends: sender cannot accept own request', $$update public.friendships set status='accepted' where to_id='00000000-0000-0000-0000-00000000000b'$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('friends: outsider sees none', $$select * from public.friendships$$, 'rows=0');
+select t.check('friends: outsider cannot delete', $$delete from public.friendships$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('friends: recipient accepts', $$update public.friendships set status='accepted' where from_id='00000000-0000-0000-0000-00000000000a'$$, 'rows=1');
+select t.check('friends: cannot change from_id/to_id', $$update public.friendships set to_id='00000000-0000-0000-0000-00000000000c'$$, 'error');
+select t.check('friends: reverse request when accepted -> already friends', $$select public.send_friend_request('00000000-0000-0000-0000-00000000000a')$$, 'error');
+-- cross request auto-accept: carol asks dave, dave asks carol
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('friends: carol -> dave', $$select public.send_friend_request('00000000-0000-0000-0000-00000000000d')$$, 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('friends: dave asking back auto-accepts', $$select public.send_friend_request('00000000-0000-0000-0000-00000000000c')$$, 'ok');
+select t.check('friends: now accepted', $$select 1 from public.friendships where status='accepted' and least(from_id,to_id)='00000000-0000-0000-0000-00000000000c'$$, 'rows=1');
+select t.check('friends: party can remove', $$delete from public.friendships where status='accepted' and to_id=auth.uid() or from_id=auth.uid()$$, 'rows=1');
+
+-- ================= DIRECT MESSAGES =================
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('dm: send', $$insert into public.direct_messages (to_id, body) values ('00000000-0000-0000-0000-00000000000b','hi bob')$$, 'ok');
+select t.check('dm: cannot spoof sender', $$insert into public.direct_messages (from_id,to_id,body) values ('00000000-0000-0000-0000-00000000000b','00000000-0000-0000-0000-00000000000a','fake')$$, 'error');
+select t.check('dm: cannot message self', $$insert into public.direct_messages (to_id, body) values (auth.uid(),'me')$$, 'error');
+select t.check('dm: empty body rejected', $$insert into public.direct_messages (to_id, body) values ('00000000-0000-0000-0000-00000000000b','   ')$$, 'error');
+select t.check('dm: >2000 chars rejected', $$insert into public.direct_messages (to_id, body) values ('00000000-0000-0000-0000-00000000000b', repeat('x',2001))$$, 'error');
+select t.check('dm: cannot edit', $$update public.direct_messages set body='edited'$$, 'error');
+select t.check('dm: cannot delete', $$delete from public.direct_messages$$, 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('dm: outsider cannot read', $$select * from public.direct_messages$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('dm: recipient reads', $$select * from public.direct_messages$$, 'rows=1');
+select t.check('dm: mark read', $$select public.mark_thread_read('00000000-0000-0000-0000-00000000000a')$$, 'ok');
+select t.check('dm: cannot write reads directly', $$insert into public.message_reads (user_id,other_id) values (auth.uid(),'00000000-0000-0000-0000-00000000000c')$$, 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('dm: others cannot see my read markers', $$select * from public.message_reads$$, 'rows=0');
+
+-- ================= COMMUNITIES =================
+select t.check('community: create private (insert returning)', $$insert into public.communities (name,description,category,visibility,posting_policy) values ('Secret Club','A private study group for tests','Study','private','everyone') returning id$$, 'ok');
+select t.keep('priv', $$select id::text from public.communities where name='Secret Club'$$);
+select t.check('community: name too short', $$insert into public.communities (name,description) values ('ab','long enough description')$$, 'error');
+select t.check('community: cannot create as someone else', $$insert into public.communities (owner_id,name,description) values ('00000000-0000-0000-0000-00000000000b','Stolen name','long enough description')$$, 'error');
+select t.check('community: creator became owner', $$select 1 from public.community_members where role='owner' and user_id=auth.uid()$$, 'rows=1');
+select t.check('community: owner can read join code', $$select code from public.community_join_codes$$, 'rows=1');
+select t.keep('code', $$select code from public.community_join_codes$$);
+
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('private: outsider cannot see community', $$select * from public.communities where visibility='private'$$, 'rows=0');
+select t.check('private: outsider cannot read join codes', $$select * from public.community_join_codes$$, 'rows=0');
+select t.check('private: outsider cannot read members', $$select * from public.community_members where role='owner'$$, 'rows=0');
+select t.check('private: outsider cannot join directly', format($$insert into public.community_members (community_id) values (%L)$$, (select v from t.ctx where k='priv')), 'error');
+select t.check('private: outsider cannot create request directly', format($$insert into public.join_requests (community_id) values (%L)$$, (select v from t.ctx where k='priv')), 'error');
+select t.check('private: wrong code rejected', $$select public.join_by_code('ZZZZZZZZ')$$, 'error');
+select t.check('private: empty code rejected', $$select public.join_by_code('  ')$$, 'error');
+select t.check('private: code works with spaces/lowercase/dash', format($$select public.join_by_code(%L)$$, lower(substr((select v from t.ctx where k='code'),1,4)||' - '||substr((select v from t.ctx where k='code'),5))), 'ok');
+select t.check('private: second use -> already-requested', format($$select 1 where (public.join_by_code(%L))->>'outcome' = 'already-requested'$$, (select v from t.ctx where k='code')), 'rows=1');
+select t.check('private: requester can now see name (pending)', $$select * from public.communities where visibility='private'$$, 'rows=1');
+select t.check('private: requester still cannot see code', $$select * from public.community_join_codes$$, 'rows=0');
+select t.check('private: requester still cannot read posts', $$select * from public.community_posts$$, 'rows=0');
+select t.check('private: requester cannot approve self', $$select public.decide_join_request(id, true) from public.join_requests$$, 'error');
+select t.check('private: probe says exists', format($$select 1 where public.private_community_exists(%L)$$, (select v from t.ctx where k='priv')), 'rows=1');
+select t.check('private: probe false for random id', $$select 1 where public.private_community_exists(gen_random_uuid())$$, 'rows=0');
+select t.check('private: requester can cancel own request', $$delete from public.join_requests where user_id=auth.uid()$$, 'rows=1');
+
+-- bob, carol, erin request; owner approves
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('req: bob', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code')), 'ok');
+select t.check('req: member without staff role cannot see requests of others', $$select * from public.join_requests$$, 'rows=1'); -- only own
+select t.check('req: bob cannot approve himself', $$select public.decide_join_request(id,true) from public.join_requests$$, 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('req: carol', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('req: erin', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code')), 'ok');
+
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('req: owner sees 3 requests', $$select * from public.join_requests$$, 'rows=3');
+select t.check('req: owner approves bob', $$select public.decide_join_request(id,true) from public.join_requests where user_id='00000000-0000-0000-0000-00000000000b'$$, 'ok');
+select t.check('req: owner approves carol', $$select public.decide_join_request(id,true) from public.join_requests where user_id='00000000-0000-0000-0000-00000000000c'$$, 'ok');
+select t.check('req: owner declines erin', $$select public.decide_join_request(id,false) from public.join_requests where user_id='00000000-0000-0000-0000-00000000000e'$$, 'ok');
+select t.check('req: 0 requests left', $$select * from public.join_requests$$, 'rows=0');
+select t.check('req: erin is not a member', $$select 1 from public.community_members where user_id='00000000-0000-0000-0000-00000000000e'$$, 'rows=0');
+select t.check('roles: owner makes bob admin', $$update public.community_members set role='admin' where user_id='00000000-0000-0000-0000-00000000000b'$$, 'rows=1');
+select t.check('roles: cannot demote owner', $$update public.community_members set role='member' where role='owner'$$, 'rows=0');
+select t.check('roles: cannot create 2nd owner', $$update public.community_members set role='owner' where user_id='00000000-0000-0000-0000-00000000000c'$$, 'error');
+
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('admin: sees join code', $$select * from public.community_join_codes$$, 'rows=1');
+select t.check('admin: cannot regenerate code', format($$select public.regenerate_join_code(%L)$$, (select v from t.ctx where k='priv')), 'error');
+select t.check('admin: cannot assign admin', $$update public.community_members set role='admin' where user_id='00000000-0000-0000-0000-00000000000c'$$, 'rows=0');
+select t.check('admin: cannot edit community', $$update public.communities set name='Hijacked'$$, 'rows=0');
+select t.check('admin: cannot delete community', $$delete from public.communities$$, 'rows=0');
+select t.check('admin: cannot change visibility', $$update public.communities set visibility='public'$$, 'rows=0');
+select t.check('admin: cannot remove owner', $$delete from public.community_members where role='owner'$$, 'rows=0');
+
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('member: cannot see join code', $$select * from public.community_join_codes$$, 'rows=0');
+select t.check('member: cannot see requests', $$select * from public.join_requests$$, 'rows=0');
+select t.check('member: cannot remove another member', $$delete from public.community_members where user_id='00000000-0000-0000-0000-00000000000b'$$, 'rows=0');
+select t.check('member: can read other members', $$select * from public.community_members$$, 'rows=3');
+select t.check('member: cannot write join code', $$update public.community_join_codes set code='AAAAAAAA'$$, 'error');
+
+-- posting policy
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('post/everyone: owner posts', format($$insert into public.community_posts (community_id, body) values (%L,'owner post')$$, (select v from t.ctx where k='priv')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('post/everyone: member posts', format($$insert into public.community_posts (community_id, body) values (%L,'member post')$$, (select v from t.ctx where k='priv')), 'ok');
+select t.check('post: cannot spoof author', format($$insert into public.community_posts (community_id, author_id, body) values (%L,'00000000-0000-0000-0000-00000000000a','fake')$$, (select v from t.ctx where k='priv')), 'error');
+select t.check('post: empty rejected', format($$insert into public.community_posts (community_id, body) values (%L,' ')$$, (select v from t.ctx where k='priv')), 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('post: non-member cannot post to private', format($$insert into public.community_posts (community_id, body) values (%L,'sneak')$$, (select v from t.ctx where k='priv')), 'error');
+select t.check('post: non-member cannot read private posts', $$select * from public.community_posts$$, 'rows=0');
+
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('policy: set admins-only', $$update public.communities set posting_policy='admins'$$, 'rows=1');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('post/admins: member blocked', format($$insert into public.community_posts (community_id, body) values (%L,'x')$$, (select v from t.ctx where k='priv')), 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('post/admins: admin allowed', format($$insert into public.community_posts (community_id, body) values (%L,'admin post')$$, (select v from t.ctx where k='priv')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('policy: set owner-only', $$update public.communities set posting_policy='owner'$$, 'rows=1');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('post/owner: admin blocked', format($$insert into public.community_posts (community_id, body) values (%L,'x')$$, (select v from t.ctx where k='priv')), 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('post/owner: owner allowed', format($$insert into public.community_posts (community_id, body) values (%L,'owner again')$$, (select v from t.ctx where k='priv')), 'ok');
+select t.check('policy: back to everyone', $$update public.communities set posting_policy='everyone'$$, 'rows=1');
+
+-- deleting posts
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('del post: admin cannot delete owner post', $$delete from public.community_posts where body='owner post'$$, 'rows=0');
+select t.check('del post: admin cannot delete another admin?? (own post ok)', $$delete from public.community_posts where body='admin post'$$, 'rows=1');
+select t.check('del post: admin deletes member post', $$delete from public.community_posts where body='member post'$$, 'rows=1');
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('del post: member cannot delete owner post', $$delete from public.community_posts where body='owner post'$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('del post: owner deletes any', $$delete from public.community_posts where body='owner post'$$, 'rows=1');
+
+-- removing members / admins
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('roles: make carol admin', $$update public.community_members set role='admin' where user_id='00000000-0000-0000-0000-00000000000c'$$, 'rows=1');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('remove: admin cannot remove another admin', $$delete from public.community_members where user_id='00000000-0000-0000-0000-00000000000c'$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('remove: owner removes admin', $$delete from public.community_members where user_id='00000000-0000-0000-0000-00000000000c'$$, 'rows=1');
+select t.check('remove: owner cannot leave', $$delete from public.community_members where user_id=auth.uid()$$, 'rows=0');
+-- re-add carol as plain member via request flow, then admin removes her
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('remove: carol re-requests', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('remove: admin approves request', $$select public.decide_join_request(id,true) from public.join_requests$$, 'ok');
+select t.check('remove: admin removes plain member', $$delete from public.community_members where user_id='00000000-0000-0000-0000-00000000000c'$$, 'rows=1');
+select t.check('remove: admin can leave', $$delete from public.community_members where user_id=auth.uid()$$, 'rows=1');
+
+-- regenerate code
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('code: owner regenerates', format($$select public.regenerate_join_code(%L)$$, (select v from t.ctx where k='priv')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('code: old code no longer works', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code')), 'error');
+
+-- private -> public admits waiting requests
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.keep('code2', $$select code from public.community_join_codes$$);
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('vis: erin requests', format($$select public.join_by_code(%L)$$, (select v from t.ctx where k='code2')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('vis: owner makes it public', $$update public.communities set visibility='public'$$, 'rows=1');
+select t.check('vis: waiting requests cleared', $$select * from public.join_requests$$, 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('vis: erin admitted', $$select 1 from public.community_members where user_id=auth.uid()$$, 'rows=1');
+
+-- public community behaviour
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('public: create', $$insert into public.communities (name,description,category,visibility,posting_policy) values ('Open Lounge','Everyone is welcome here','Other','public','everyone')$$, 'ok');
+select t.keep('pub', $$select id::text from public.communities where name='Open Lounge'$$);
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('public: outsider can read it', $$select * from public.communities where name='Open Lounge'$$, 'rows=1');
+select t.check('public: outsider cannot read its code', $$select * from public.community_join_codes$$, 'rows=0');
+select t.check('public: cannot join as admin', format($$insert into public.community_members (community_id, role) values (%L,'admin')$$, (select v from t.ctx where k='pub')), 'error');
+select t.check('public: cannot join as someone else', format($$insert into public.community_members (community_id, user_id) values (%L,'00000000-0000-0000-0000-00000000000e')$$, (select v from t.ctx where k='pub')), 'error');
+select t.check('public: joins directly as member', format($$insert into public.community_members (community_id) values (%L)$$, (select v from t.ctx where k='pub')), 'ok');
+select t.check('public: joining twice fails', format($$insert into public.community_members (community_id) values (%L)$$, (select v from t.ctx where k='pub')), 'error');
+select t.check('public: member can post', format($$insert into public.community_posts (community_id, body) values (%L,'hello all')$$, (select v from t.ctx where k='pub')), 'ok');
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('public: non-member can read posts', format($$select * from public.community_posts where community_id=%L$$, (select v from t.ctx where k='pub')), 'rows=1');
+select t.check('public: non-member cannot post', format($$insert into public.community_posts (community_id, body) values (%L,'x')$$, (select v from t.ctx where k='pub')), 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.keep('pubcode', format($$select code from public.community_join_codes where community_id=%L$$, (select v from t.ctx where k='pub')));
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('public: join_by_code -> already-member or joined', format($$select 1 where (public.join_by_code(%L))->>'outcome' in ('joined','already-member')$$, (select v from t.ctx where k='pubcode')), 'rows=1');
+
+-- delete community cascades
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('delete: non-owner cannot delete', format($$delete from public.communities where id=%L$$, (select v from t.ctx where k='pub')), 'rows=0');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('delete: owner deletes', format($$delete from public.communities where id=%L$$, (select v from t.ctx where k='pub')), 'rows=1');
+reset role;
+select t.check('delete: cascade removed members/posts/code', format($$select 1 from public.community_members where community_id=%L union all select 1 from public.community_posts where community_id=%L union all select 1 from public.community_join_codes where community_id=%L$$, (select v from t.ctx where k='pub'),(select v from t.ctx where k='pub'),(select v from t.ctx where k='pub')), 'rows=0');
+
+-- ================= SEARCH =================
+set role authenticated;
+select t.as_user('00000000-0000-0000-0000-00000000000d');
+select t.check('search: by name', $$select * from public.search_profiles('alice')$$, 'rows=1');
+select t.check('search: by partial + @', $$select * from public.search_profiles('@ali')$$, 'rows=1');
+select t.check('search: 1 char returns nothing', $$select * from public.search_profiles('a')$$, 'rows=0');
+select t.check('search: excludes self', $$select * from public.search_profiles('dave')$$, 'rows=0');
+select t.check('search: % is literal, not wildcard', $$select * from public.search_profiles('%%')$$, 'rows=0');
+select t.check('search: _ is literal', $$select * from public.search_profiles('__')$$, 'rows=0');
+select t.check('search: by COVA id prefix', $$select * from public.search_profiles('cova-')$$, 'rows=4');
+
+-- ================= ANON =================
+reset role;
+set role anon;
+select t.check('anon: cannot read profiles', $$select * from public.profiles$$, 'error');
+select t.check('anon: cannot read messages', $$select * from public.direct_messages$$, 'error');
+select t.check('anon: cannot call join_by_code', $$select public.join_by_code('AAAAAAAA')$$, 'error');
+select t.check('anon: cannot call search', $$select * from public.search_profiles('alice')$$, 'error');
+reset role;
+
+-- ================= account deletion =================
+delete from auth.users where id='00000000-0000-0000-0000-00000000000d';
+select t.check('account delete removes profile', $$select 1 from public.profiles where id='00000000-0000-0000-0000-00000000000d'$$, 'rows=0');
+
+\echo ======== RESULTS ========
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results order by ok, label;
+select 'TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results;
+

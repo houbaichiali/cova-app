@@ -1,0 +1,31 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build output
+.next
+out
+build
+*.tsbuildinfo
+next-env.d.ts
+
+# env files (never commit real secrets)
+.env
+.env.*
+!.env.example
+
+# logs and OS files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# prisma local db / generated
+prisma/*.db

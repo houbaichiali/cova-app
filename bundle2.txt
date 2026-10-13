@@ -1,0 +1,1480 @@
+﻿
+===== src\components\layout\AppShell.tsx =====
+"use client";
+
+import { useState, type ReactNode } from "react";
+import { Header } from "@/components/layout/Header";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { useT } from "@/i18n/client";
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const [navOpen, setNavOpen] = useState(false);
+  const t = useT();
+  return (
+    <div className="min-h-screen">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2"
+      >
+        {t("nav.skip")}
+      </a>
+      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+      <div className="lg:ps-64">
+        <Header onMenuClick={() => setNavOpen(true)} />
+        <main id="main" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+
+===== src\components\layout\Header.tsx =====
+"use client";
+
+import { Menu, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/Badge";
+import { NotificationsPanel } from "@/components/layout/NotificationsPanel";
+import { UserMenu } from "@/components/layout/UserMenu";
+import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { useI18n } from "@/i18n/client";
+import { useDemoState } from "@/lib/demo-store";
+import { computeXp, levelFor } from "@/lib/progress";
+
+export function Header({ onMenuClick }: { onMenuClick: () => void }) {
+  const state = useDemoState();
+  const { t, formatTag } = useI18n();
+  const xp = computeXp(state);
+  const { level } = levelFor(xp);
+
+  return (
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-cova-line bg-white/90 px-4 backdrop-blur sm:px-6">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          aria-label={t("nav.open")}
+          className="rounded-lg p-2 text-cova-ink hover:bg-cova-pale lg:hidden"
+        >
+          <Menu className="h-5 w-5" aria-hidden="true" />
+        </button>
+        <Badge tone="outline">{t("header.demo")}</Badge>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="hidden items-center gap-1.5 rounded-full bg-cova-pale px-3 py-1 text-xs font-medium text-cova-ink sm:inline-flex">
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("header.level", { level, xp: xp.toLocaleString(formatTag) })}
+        </span>
+        <LanguageSwitcher className="hidden sm:inline-flex" />
+        <NotificationsPanel />
+        <UserMenu />
+      </div>
+    </header>
+  );
+}
+
+
+===== src\components\layout\UserMenu.tsx =====
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useRef, useState } from "react";
+import { ChevronDown, LogOut, RotateCcw, Settings, User } from "lucide-react";
+import { Avatar } from "@/components/ui/Avatar";
+import { useToast } from "@/components/ui/Toast";
+import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { useT } from "@/i18n/client";
+import { demoActions, useDemoState } from "@/lib/demo-store";
+import { useOutsideClose } from "@/lib/use-outside-close";
+
+export function UserMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const toast = useToast();
+  const t = useT();
+  const close = useCallback(() => setOpen(false), []);
+  useOutsideClose(ref, open, close);
+
+  const { settings, session } = useDemoState();
+  const name = session?.name ?? settings.displayName;
+
+  const itemClass =
+    "flex w-full items-center gap-2 px-4 py-2 text-start text-sm text-cova-ink hover:bg-cova-bg";
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-lg p-1.5 pe-2 hover:bg-cova-pale"
+      >
+        <Avatar name={name} size="sm" />
+        <span className="hidden max-w-32 truncate text-sm font-medium sm:block">{name}</span>
+        <ChevronDown className="h-4 w-4 text-cova-mute" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute end-0 z-50 mt-2 w-60 rounded-xl border border-cova-line bg-white py-2"
+        >
+          <div className="border-b border-cova-line px-4 pb-2">
+            <p className="truncate text-sm font-semibold">{name}</p>
+            <p className="truncate text-xs text-cova-mute">{session?.email ?? settings.email}</p>
+          </div>
+          <div className="border-b border-cova-line px-4 py-2 sm:hidden">
+            <LanguageSwitcher />
+          </div>
+          <Link href="/settings" role="menuitem" onClick={close} className={itemClass}>
+            <Settings className="h-4 w-4" aria-hidden="true" /> {t("user.settings")}
+          </Link>
+          <Link
+            href="/community/amara-okafor"
+            role="menuitem"
+            onClick={close}
+            className={itemClass}
+          >
+            <User className="h-4 w-4" aria-hidden="true" /> {t("user.exampleProfile")}
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              demoActions.reset();
+              close();
+              toast.push(t("user.resetDone"));
+            }}
+          >
+            <RotateCcw className="h-4 w-4" aria-hidden="true" /> {t("user.reset")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              demoActions.signOut();
+              close();
+              router.push("/login");
+            }}
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" /> {t("user.signOut")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+===== src\types\index.ts =====
+/**
+ * UI / demo types used by the frontend today.
+ * The planned database-shaped entities live in ./models.ts.
+ */
+
+export type Tone = "pale" | "soft" | "muted";
+
+export interface Student {
+  id: string;
+  name: string;
+  headline: string;
+  school: string;
+  major: string;
+  location: string;
+  bio: string;
+  skills: string[];
+  interests: string[];
+  xp: number;
+  badges: string[];
+  joined: string;
+  tone: Tone;
+}
+
+export type GroupCategory = "Study" | "Project" | "Coding" | "Design" | "Languages";
+
+export interface GroupActivity {
+  id: string;
+  author: string;
+  text: string;
+  time: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description: string;
+  category: GroupCategory;
+  memberIds: string[];
+  tags: string[];
+  isPrivate: boolean;
+  nextSession?: string;
+  ownerId: string;
+  activity: GroupActivity[];
+}
+
+export type LessonType = "video" | "reading" | "exercise";
+
+export interface Lesson {
+  id: string;
+  title: string;
+  minutes: number;
+  type: LessonType;
+  summary: string;
+}
+
+export type CourseLevel = "Beginner" | "Intermediate" | "Advanced";
+
+export interface Course {
+  id: string;
+  title: string;
+  description: string;
+  level: CourseLevel;
+  category: string;
+  instructor: string;
+  tags: string[];
+  learners: number;
+  lessons: Lesson[];
+}
+
+export type AssignmentStatus = "todo" | "in-progress" | "submitted" | "graded";
+
+export interface Assignment {
+  id: string;
+  title: string;
+  courseId: string;
+  description: string;
+  /** ISO date (YYYY-MM-DD) */
+  due: string;
+  points: number;
+  status: AssignmentStatus;
+  grade?: number;
+}
+
+export type Difficulty = "Easy" | "Medium" | "Hard";
+export type ChallengeKind = "Daily" | "Weekly" | "Coding" | "Community";
+
+export interface Challenge {
+  id: string;
+  title: string;
+  description: string;
+  kind: ChallengeKind;
+  difficulty: Difficulty;
+  points: number;
+  minutes: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  from: "me" | "them";
+  text: string;
+  time: string;
+}
+
+export interface Conversation {
+  id: string;
+  participantId: string;
+  unread: number;
+  messages: ChatMessage[];
+}
+
+export type NotificationKind = "assignment" | "group" | "challenge" | "message" | "system";
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  time: string;
+  href?: string;
+}
+
+export type ResourceType = "Article" | "Video" | "Cheatsheet" | "Tool" | "Book";
+
+export interface Resource {
+  id: string;
+  title: string;
+  type: ResourceType;
+  category: string;
+  description: string;
+  minutes: number;
+}
+
+export interface UserSettings {
+  displayName: string;
+  email: string;
+  bio: string;
+  emailNotifications: boolean;
+  messageAlerts: boolean;
+  weeklyDigest: boolean;
+  profileVisibility: "everyone" | "groups" | "private";
+}
+
+export interface DemoSession {
+  name: string;
+  email: string;
+}
+
+
+===== src\lib\result.ts =====
+import type { ActionResult } from "@/types/social";
+
+export function ok<T>(value: T): ActionResult<T> {
+  return { ok: true, value };
+}
+
+export function fail<T = undefined>(error: string): ActionResult<T> {
+  return { ok: false, error };
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\app\(auth)\layout.tsx =====
+import type { ReactNode } from "react";
+import { Logo } from "@/components/ui/Logo";
+import { DemoNotice } from "@/components/ui/DemoNotice";
+import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { getT } from "@/i18n/server";
+
+export default async function AuthLayout({ children }: { children: ReactNode }) {
+  const t = await getT();
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-cova-pale/60 to-cova-bg px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-8 flex items-center justify-between">
+          <Logo showTagline />
+          <LanguageSwitcher />
+        </div>
+        <div className="rounded-2xl border border-cova-line bg-white p-6 sm:p-8">{children}</div>
+        <div className="mt-4">
+          <DemoNotice>{t("auth.demoNotice")}</DemoNotice>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\app\(auth)\login\page.tsx =====
+import type { Metadata } from "next";
+import { LoginForm } from "@/components/auth/LoginForm";
+
+export const metadata: Metadata = { title: "Log in" };
+
+export default function LoginPage() {
+  return <LoginForm />;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\app\(auth)\register\page.tsx =====
+import type { Metadata } from "next";
+import { RegisterForm } from "@/components/auth/RegisterForm";
+
+export const metadata: Metadata = { title: "Create account" };
+
+export default function RegisterPage() {
+  return <RegisterForm />;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\client.tsx =====
+"use client";
+
+import { useRouter } from "next/navigation";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { LOCALE_COOKIE, LOCALE_DIR, LOCALE_FORMAT, type Locale } from "@/i18n/config";
+import { makeT, type TFunction } from "@/i18n/translate";
+
+interface I18nValue {
+  locale: Locale;
+  dir: "ltr" | "rtl";
+  t: TFunction;
+  /** BCP-47 tag for Intl / toLocaleString. */
+  formatTag: string;
+  setLocale: (locale: Locale) => void;
+}
+
+const I18nContext = createContext<I18nValue | null>(null);
+
+export function I18nProvider({
+  initialLocale,
+  children,
+}: {
+  initialLocale: Locale;
+  children: ReactNode;
+}) {
+  const router = useRouter();
+  const [locale, setLocaleState] = useState<Locale>(initialLocale);
+
+  // Keep <html lang dir> in sync when the person switches language without a reload.
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = LOCALE_DIR[locale];
+  }, [locale]);
+
+  const setLocale = useCallback(
+    (next: Locale) => {
+      setLocaleState(next);
+      // One year. Read by the server so the first paint already uses the right language.
+      document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
+      router.refresh(); // re-render server components in the new language
+    },
+    [router],
+  );
+
+  const value = useMemo<I18nValue>(
+    () => ({
+      locale,
+      dir: LOCALE_DIR[locale],
+      t: makeT(locale),
+      formatTag: LOCALE_FORMAT[locale],
+      setLocale,
+    }),
+    [locale, setLocale],
+  );
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n(): I18nValue {
+  const ctx = useContext(I18nContext);
+  if (!ctx) throw new Error("useI18n must be used within I18nProvider");
+  return ctx;
+}
+
+export function useT(): TFunction {
+  return useI18n().t;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\config.ts =====
+export const LOCALES = ["en", "fr", "ar"] as const;
+export type Locale = (typeof LOCALES)[number];
+
+export const DEFAULT_LOCALE: Locale = "en";
+export const LOCALE_COOKIE = "cova-locale";
+
+/** Names are written in their own language so people can always find theirs. */
+export const LOCALE_NAMES: Record<Locale, string> = {
+  en: "English",
+  fr: "FranÃ§ais",
+  ar: "Ø§Ù„Ø¹Ø±Ø¨ÙŠØ©",
+};
+
+export const LOCALE_DIR: Record<Locale, "ltr" | "rtl"> = {
+  en: "ltr",
+  fr: "ltr",
+  ar: "rtl",
+};
+
+/** BCP-47 tags for Intl formatting (Arabic uses Latin digits to match the rest of the UI). */
+export const LOCALE_FORMAT: Record<Locale, string> = {
+  en: "en-US",
+  fr: "fr-FR",
+  ar: "ar-MA",
+};
+
+export function isLocale(value: string | undefined | null): value is Locale {
+  return !!value && (LOCALES as readonly string[]).includes(value);
+}
+
+/** Picks the best supported locale from an Accept-Language header. */
+export function matchAcceptLanguage(header: string | null | undefined): Locale {
+  if (!header) return DEFAULT_LOCALE;
+  const wanted = header
+    .split(",")
+    .map((part) => part.trim().split(";")[0]?.toLowerCase().split("-")[0] ?? "")
+    .filter(Boolean);
+  for (const tag of wanted) if (isLocale(tag)) return tag;
+  return DEFAULT_LOCALE;
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\server.ts =====
+import { cookies, headers } from "next/headers";
+import { LOCALE_COOKIE, isLocale, matchAcceptLanguage, type Locale } from "@/i18n/config";
+import { makeT, type TFunction } from "@/i18n/translate";
+
+/** Locale for the current request: saved choice first, then the browser's language. */
+export async function getLocale(): Promise<Locale> {
+  const saved = (await cookies()).get(LOCALE_COOKIE)?.value;
+  if (isLocale(saved)) return saved;
+  return matchAcceptLanguage((await headers()).get("accept-language"));
+}
+
+export async function getT(): Promise<TFunction> {
+  return makeT(await getLocale());
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\spaces.ts =====
+"use client";
+
+import { useI18n } from "@/i18n/client";
+import type { Locale } from "@/i18n/config";
+
+/** Separate catalog for Voicing, group chats and the leaderboard (en / fr / ar). */
+const en = {
+  "nav.voicing": "Voicing",
+  "v.title": "Voicing",
+  "v.desc": "Voice meeting rooms. Create a room, share its link or code, and talk with 3D avatars.",
+  "g.title": "Groups",
+  "g.desc": "Group chats for students. Join with a link or code, or create your own.",
+  "lobby.create": "Create",
+  "lobby.createVoice": "Create a voice room",
+  "lobby.createGroup": "Create a group",
+  "lobby.name": "Name",
+  "lobby.description": "Description (optional)",
+  "lobby.public": "Public",
+  "lobby.publicHint": "Anyone can find it and join instantly with the link or code.",
+  "lobby.private": "Private",
+  "lobby.privateHint": "People must send a join request that you or a moderator approves.",
+  "lobby.submit": "Create",
+  "lobby.joinByCode": "Join with a code",
+  "lobby.codePlaceholder": "Enter code (e.g. K7P2QX)",
+  "lobby.join": "Join",
+  "lobby.browse": "Public",
+  "lobby.mine": "Mine",
+  "lobby.search": "Search public spaces",
+  "lobby.none": "Nothing here yet.",
+  "lobby.members": "{n} online",
+  "lobby.membersG": "{n} members",
+  "lobby.errName": "Please enter a name (2+ characters).",
+  "lobby.errCode": "Please enter a valid code.",
+  "lobby.errServer": "Could not reach the server.",
+  "room.notFound": "This room does not exist or has ended.",
+  "room.joinTitle": "Join â€œ{name}â€",
+  "room.requestTitle": "Request to join â€œ{name}â€",
+  "room.requestHint": "This space is private. The owner or a moderator must approve you.",
+  "room.yourName": "Your name",
+  "room.avatar": "Choose your avatar",
+  "room.side": "Your side of the screen",
+  "room.left": "Left",
+  "room.right": "Right",
+  "room.joinNow": "Join now",
+  "room.sendRequest": "Send join request",
+  "room.waiting": "Waiting for approvalâ€¦",
+  "room.waitingHint": "You will enter automatically as soon as you are approved.",
+  "room.cancel": "Cancel request",
+  "room.denied": "Your request was declined.",
+  "room.kicked": "You were removed from this space.",
+  "room.closed": "This space was closed by its owner.",
+  "room.back": "Back",
+  "room.leave": "Leave",
+  "room.mute": "Mute",
+  "room.unmute": "Unmute",
+  "room.micOff": "Microphone unavailable â€” you can listen but not speak.",
+  "room.copyLink": "Copy link",
+  "room.copyCode": "Copy code",
+  "room.copied": "Copied",
+  "room.code": "Code",
+  "room.participants": "Participants",
+  "room.requests": "Join requests",
+  "room.approve": "Approve",
+  "room.deny": "Decline",
+  "room.makeMod": "Make moderator",
+  "room.removeMod": "Remove moderator",
+  "room.muteThem": "Mute",
+  "room.remove": "Remove",
+  "room.owner": "Owner",
+  "room.mod": "Moderator",
+  "room.you": "you",
+  "room.makePublic": "Make public",
+  "room.makePrivate": "Make private",
+  "room.close": "Close",
+  "room.type": "Write a messageâ€¦",
+  "room.send": "Send",
+  "room.noMessages": "No messages yet. Say hello!",
+  "lb.title": "Leaderboard",
+  "lb.desc": "XP rankings linked to your account. Other students' scores are sample data.",
+  "lb.signin": "Sign in to link your XP to your account and appear in the ranking.",
+  "lb.signinBtn": "Sign in",
+  "lb.you": "you",
+  "lb.rank": "Rank",
+  "lb.student": "Student",
+  "lb.level": "Level",
+  "lb.xp": "XP",
+  "lb.all": "All time",
+  "lb.top5": "Top 5",
+  "lb.ranked": "{name}, you are ranked #{rank} with {xp} XP.",
+  "lb.breakdown": "Where your XP comes from",
+  "lb.b.base": "Account base",
+  "lb.b.learning": "Lessons, assignments, challenges",
+  "lb.b.voice": "Voicing minutes",
+  "lb.b.hosted": "Rooms and groups created",
+  "lb.b.chat": "Group messages",
+} as const;
+export type SKey = keyof typeof en;
+
+const fr: Record<SKey, string> = {
+  "nav.voicing": "Voicing",
+  "v.title": "Voicing",
+  "v.desc":
+    "Salles de rÃ©union vocales. CrÃ©ez une salle, partagez le lien ou le code, et parlez avec des avatars 3D.",
+  "g.title": "Groupes",
+  "g.desc": "Chats de groupe pour Ã©tudiants. Rejoignez avec un lien ou un code, ou crÃ©ez le vÃ´tre.",
+  "lobby.create": "CrÃ©er",
+  "lobby.createVoice": "CrÃ©er une salle vocale",
+  "lobby.createGroup": "CrÃ©er un groupe",
+  "lobby.name": "Nom",
+  "lobby.description": "Description (facultatif)",
+  "lobby.public": "Public",
+  "lobby.publicHint":
+    "Tout le monde peut le trouver et entrer directement avec le lien ou le code.",
+  "lobby.private": "PrivÃ©",
+  "lobby.privateHint": "Il faut envoyer une demande, approuvÃ©e par vous ou un modÃ©rateur.",
+  "lobby.submit": "CrÃ©er",
+  "lobby.joinByCode": "Rejoindre avec un code",
+  "lobby.codePlaceholder": "Saisir le code (ex. K7P2QX)",
+  "lobby.join": "Rejoindre",
+  "lobby.browse": "Publics",
+  "lobby.mine": "Les miens",
+  "lobby.search": "Rechercher parmi les espaces publics",
+  "lobby.none": "Rien pour le moment.",
+  "lobby.members": "{n} en ligne",
+  "lobby.membersG": "{n} membres",
+  "lobby.errName": "Saisissez un nom (2 caractÃ¨res minimum).",
+  "lobby.errCode": "Saisissez un code valide.",
+  "lobby.errServer": "Serveur injoignable.",
+  "room.notFound": "Cette salle n'existe pas ou est terminÃ©e.",
+  "room.joinTitle": "Rejoindre Â« {name} Â»",
+  "room.requestTitle": "Demander Ã  rejoindre Â« {name} Â»",
+  "room.requestHint": "Cet espace est privÃ©. Le propriÃ©taire ou un modÃ©rateur doit vous approuver.",
+  "room.yourName": "Votre nom",
+  "room.avatar": "Choisissez votre avatar",
+  "room.side": "Votre cÃ´tÃ© de l'Ã©cran",
+  "room.left": "Gauche",
+  "room.right": "Droite",
+  "room.joinNow": "Entrer",
+  "room.sendRequest": "Envoyer la demande",
+  "room.waiting": "En attente d'approbationâ€¦",
+  "room.waitingHint": "Vous entrerez automatiquement dÃ¨s que vous serez approuvÃ©.",
+  "room.cancel": "Annuler la demande",
+  "room.denied": "Votre demande a Ã©tÃ© refusÃ©e.",
+  "room.kicked": "Vous avez Ã©tÃ© retirÃ© de cet espace.",
+  "room.closed": "Cet espace a Ã©tÃ© fermÃ© par son propriÃ©taire.",
+  "room.back": "Retour",
+  "room.leave": "Quitter",
+  "room.mute": "Couper le micro",
+  "room.unmute": "Activer le micro",
+  "room.micOff": "Micro indisponible â€” vous pouvez Ã©couter mais pas parler.",
+  "room.copyLink": "Copier le lien",
+  "room.copyCode": "Copier le code",
+  "room.copied": "CopiÃ©",
+  "room.code": "Code",
+  "room.participants": "Participants",
+  "room.requests": "Demandes d'adhÃ©sion",
+  "room.approve": "Approuver",
+  "room.deny": "Refuser",
+  "room.makeMod": "Nommer modÃ©rateur",
+  "room.removeMod": "Retirer modÃ©rateur",
+  "room.muteThem": "Couper le micro",
+  "room.remove": "Retirer",
+  "room.owner": "PropriÃ©taire",
+  "room.mod": "ModÃ©rateur",
+  "room.you": "vous",
+  "room.makePublic": "Rendre public",
+  "room.makePrivate": "Rendre privÃ©",
+  "room.close": "Fermer",
+  "room.type": "Ã‰crire un messageâ€¦",
+  "room.send": "Envoyer",
+  "room.noMessages": "Aucun message. Dites bonjour !",
+  "lb.title": "Classement",
+  "lb.desc": "Classement XP liÃ© Ã  votre compte. Les scores des autres Ã©tudiants sont des exemples.",
+  "lb.signin": "Connectez-vous pour lier votre XP Ã  votre compte et apparaÃ®tre dans le classement.",
+  "lb.signinBtn": "Se connecter",
+  "lb.you": "vous",
+  "lb.rank": "Rang",
+  "lb.student": "Ã‰tudiant",
+  "lb.level": "Niveau",
+  "lb.xp": "XP",
+  "lb.all": "Tout le temps",
+  "lb.top5": "Top 5",
+  "lb.ranked": "{name}, vous Ãªtes #{rank} avec {xp} XP.",
+  "lb.breakdown": "D'oÃ¹ viennent vos XP",
+  "lb.b.base": "Base du compte",
+  "lb.b.learning": "LeÃ§ons, devoirs, dÃ©fis",
+  "lb.b.voice": "Minutes Voicing",
+  "lb.b.hosted": "Salles et groupes crÃ©Ã©s",
+  "lb.b.chat": "Messages de groupe",
+};
+
+const ar: Record<SKey, string> = {
+  "nav.voicing": "Voicing",
+  "v.title": "Voicing",
+  "v.desc": "ØºØ±Ù Ø§Ø¬ØªÙ…Ø§Ø¹Ø§Øª ØµÙˆØªÙŠØ©. Ø£Ù†Ø´Ø¦ ØºØ±ÙØ©ØŒ Ø´Ø§Ø±Ùƒ Ø§Ù„Ø±Ø§Ø¨Ø· Ø£Ùˆ Ø§Ù„ÙƒÙˆØ¯ØŒ ÙˆØªØ­Ø¯Ø«ÙˆØ§ Ø¨Ø£ÙØ§ØªØ§Ø± Ø«Ù„Ø§Ø«ÙŠ Ø§Ù„Ø£Ø¨Ø¹Ø§Ø¯.",
+  "g.title": "Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª",
+  "g.desc": "Ù…Ø¬Ù…ÙˆØ¹Ø§Øª Ø¯Ø±Ø¯Ø´Ø© Ù„Ù„Ø·Ù„Ø§Ø¨. Ø§Ù†Ø¶Ù… Ø¨Ø§Ù„Ø±Ø§Ø¨Ø· Ø£Ùˆ Ø§Ù„ÙƒÙˆØ¯ØŒ Ø£Ùˆ Ø£Ù†Ø´Ø¦ Ù…Ø¬Ù…ÙˆØ¹ØªÙƒ.",
+  "lobby.create": "Ø¥Ù†Ø´Ø§Ø¡",
+  "lobby.createVoice": "Ø¥Ù†Ø´Ø§Ø¡ ØºØ±ÙØ© ØµÙˆØªÙŠØ©",
+  "lobby.createGroup": "Ø¥Ù†Ø´Ø§Ø¡ Ù…Ø¬Ù…ÙˆØ¹Ø©",
+  "lobby.name": "Ø§Ù„Ø§Ø³Ù…",
+  "lobby.description": "Ø§Ù„ÙˆØµÙ (Ø§Ø®ØªÙŠØ§Ø±ÙŠ)",
+  "lobby.public": "Ø¹Ø§Ù…Ø©",
+  "lobby.publicHint": "ÙŠÙ…ÙƒÙ† Ù„Ø£ÙŠ Ø´Ø®Øµ Ø¥ÙŠØ¬Ø§Ø¯Ù‡Ø§ ÙˆØ§Ù„Ø¯Ø®ÙˆÙ„ ÙÙˆØ±Ù‹Ø§ Ø¨Ø§Ù„Ø±Ø§Ø¨Ø· Ø£Ùˆ Ø§Ù„ÙƒÙˆØ¯.",
+  "lobby.private": "Ø®Ø§ØµØ©",
+  "lobby.privateHint": "ÙŠØ¬Ø¨ Ø¥Ø±Ø³Ø§Ù„ Ø·Ù„Ø¨ Ø§Ù†Ø¶Ù…Ø§Ù… ÙŠÙˆØ§ÙÙ‚ Ø¹Ù„ÙŠÙ‡ Ø§Ù„Ù…Ù†Ø´Ø¦ Ø£Ùˆ Ø£Ø­Ø¯ Ø§Ù„Ù…Ø´Ø±ÙÙŠÙ†.",
+  "lobby.submit": "Ø¥Ù†Ø´Ø§Ø¡",
+  "lobby.joinByCode": "Ø§Ù†Ø¶Ù… Ø¨Ø§Ù„ÙƒÙˆØ¯",
+  "lobby.codePlaceholder": "Ø£Ø¯Ø®Ù„ Ø§Ù„ÙƒÙˆØ¯ (Ù…Ø«Ø§Ù„ K7P2QX)",
+  "lobby.join": "Ø§Ù†Ø¶Ù…Ø§Ù…",
+  "lobby.browse": "Ø§Ù„Ø¹Ø§Ù…Ø©",
+  "lobby.mine": "Ø§Ù„Ø®Ø§ØµØ© Ø¨ÙŠ",
+  "lobby.search": "Ø§Ø¨Ø­Ø« ÙÙŠ Ø§Ù„ØºØ±Ù Ø§Ù„Ø¹Ø§Ù…Ø©",
+  "lobby.none": "Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ø´ÙŠØ¡ Ø¨Ø¹Ø¯.",
+  "lobby.members": "{n} Ù…ØªØµÙ„",
+  "lobby.membersG": "{n} Ø¹Ø¶Ùˆ",
+  "lobby.errName": "Ø£Ø¯Ø®Ù„ Ø§Ø³Ù…Ù‹Ø§ (Ø­Ø±ÙØ§Ù† Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„).",
+  "lobby.errCode": "Ø£Ø¯Ø®Ù„ ÙƒÙˆØ¯Ù‹Ø§ ØµØ­ÙŠØ­Ù‹Ø§.",
+  "lobby.errServer": "ØªØ¹Ø°Ø± Ø§Ù„ÙˆØµÙˆÙ„ Ø¥Ù„Ù‰ Ø§Ù„Ø®Ø§Ø¯Ù….",
+  "room.notFound": "Ù‡Ø°Ù‡ Ø§Ù„ØºØ±ÙØ© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ Ø§Ù†ØªÙ‡Øª.",
+  "room.joinTitle": "Ø§Ù„Ø§Ù†Ø¶Ù…Ø§Ù… Ø¥Ù„Ù‰ Â«{name}Â»",
+  "room.requestTitle": "Ø·Ù„Ø¨ Ø§Ù„Ø§Ù†Ø¶Ù…Ø§Ù… Ø¥Ù„Ù‰ Â«{name}Â»",
+  "room.requestHint": "Ù‡Ø°Ù‡ Ø§Ù„Ù…Ø³Ø§Ø­Ø© Ø®Ø§ØµØ©. ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙˆØ§ÙÙ‚ Ø¹Ù„ÙŠÙƒ Ø§Ù„Ù…Ù†Ø´Ø¦ Ø£Ùˆ Ø£Ø­Ø¯ Ø§Ù„Ù…Ø´Ø±ÙÙŠÙ†.",
+  "room.yourName": "Ø§Ø³Ù…Ùƒ",
+  "room.avatar": "Ø§Ø®ØªØ± Ø§Ù„Ø£ÙØ§ØªØ§Ø±",
+  "room.side": "Ø¬Ù‡ØªÙƒ ÙÙŠ Ø§Ù„Ø´Ø§Ø´Ø©",
+  "room.left": "Ø§Ù„ÙŠØ³Ø§Ø±",
+  "room.right": "Ø§Ù„ÙŠÙ…ÙŠÙ†",
+  "room.joinNow": "Ø§Ø¯Ø®Ù„ Ø§Ù„Ø¢Ù†",
+  "room.sendRequest": "Ø¥Ø±Ø³Ø§Ù„ Ø·Ù„Ø¨ Ø§Ù„Ø§Ù†Ø¶Ù…Ø§Ù…",
+  "room.waiting": "Ø¨Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø©â€¦",
+  "room.waitingHint": "Ø³ØªØ¯Ø®Ù„ ØªÙ„Ù‚Ø§Ø¦ÙŠÙ‹Ø§ ÙÙˆØ± Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø© Ø¹Ù„ÙŠÙƒ.",
+  "room.cancel": "Ø¥Ù„ØºØ§Ø¡ Ø§Ù„Ø·Ù„Ø¨",
+  "room.denied": "ØªÙ… Ø±ÙØ¶ Ø·Ù„Ø¨Ùƒ.",
+  "room.kicked": "ØªÙ…Øª Ø¥Ø²Ø§Ù„ØªÙƒ Ù…Ù† Ù‡Ø°Ù‡ Ø§Ù„Ù…Ø³Ø§Ø­Ø©.",
+  "room.closed": "Ø£ØºÙ„Ù‚ Ø§Ù„Ù…Ù†Ø´Ø¦ Ù‡Ø°Ù‡ Ø§Ù„Ù…Ø³Ø§Ø­Ø©.",
+  "room.back": "Ø±Ø¬ÙˆØ¹",
+  "room.leave": "Ù…ØºØ§Ø¯Ø±Ø©",
+  "room.mute": "ÙƒØªÙ…",
+  "room.unmute": "Ø¥Ù„ØºØ§Ø¡ Ø§Ù„ÙƒØªÙ…",
+  "room.micOff": "Ø§Ù„Ù…ÙŠÙƒØ±ÙˆÙÙˆÙ† ØºÙŠØ± Ù…ØªØ§Ø­ â€” ØªØ³ØªØ·ÙŠØ¹ Ø§Ù„Ø§Ø³ØªÙ…Ø§Ø¹ ÙÙ‚Ø·.",
+  "room.copyLink": "Ù†Ø³Ø® Ø§Ù„Ø±Ø§Ø¨Ø·",
+  "room.copyCode": "Ù†Ø³Ø® Ø§Ù„ÙƒÙˆØ¯",
+  "room.copied": "ØªÙ… Ø§Ù„Ù†Ø³Ø®",
+  "room.code": "Ø§Ù„ÙƒÙˆØ¯",
+  "room.participants": "Ø§Ù„Ù…Ø´Ø§Ø±ÙƒÙˆÙ†",
+  "room.requests": "Ø·Ù„Ø¨Ø§Øª Ø§Ù„Ø§Ù†Ø¶Ù…Ø§Ù…",
+  "room.approve": "Ù‚Ø¨ÙˆÙ„",
+  "room.deny": "Ø±ÙØ¶",
+  "room.makeMod": "ØªØ¹ÙŠÙŠÙ† ÙƒÙ…Ø´Ø±Ù",
+  "room.removeMod": "Ø¥Ø²Ø§Ù„Ø© Ø§Ù„Ø¥Ø´Ø±Ø§Ù",
+  "room.muteThem": "ÙƒØªÙ…",
+  "room.remove": "Ø¥Ø²Ø§Ù„Ø©",
+  "room.owner": "Ø§Ù„Ù…Ù†Ø´Ø¦",
+  "room.mod": "Ù…Ø´Ø±Ù",
+  "room.you": "Ø£Ù†Øª",
+  "room.makePublic": "Ø¬Ø¹Ù„Ù‡Ø§ Ø¹Ø§Ù…Ø©",
+  "room.makePrivate": "Ø¬Ø¹Ù„Ù‡Ø§ Ø®Ø§ØµØ©",
+  "room.close": "Ø¥ØºÙ„Ø§Ù‚",
+  "room.type": "Ø§ÙƒØªØ¨ Ø±Ø³Ø§Ù„Ø©â€¦",
+  "room.send": "Ø¥Ø±Ø³Ø§Ù„",
+  "room.noMessages": "Ù„Ø§ ØªÙˆØ¬Ø¯ Ø±Ø³Ø§Ø¦Ù„ Ø¨Ø¹Ø¯. Ù‚Ù„ Ù…Ø±Ø­Ø¨Ù‹Ø§!",
+  "lb.title": "Ø§Ù„Ù…ØªØµØ¯Ø±ÙˆÙ†",
+  "lb.desc": "ØªØ±ØªÙŠØ¨ Ø§Ù„Ù†Ù‚Ø§Ø· Ù…Ø±ØªØ¨Ø· Ø¨Ø­Ø³Ø§Ø¨Ùƒ. Ù†ØªØ§Ø¦Ø¬ Ø¨Ù‚ÙŠØ© Ø§Ù„Ø·Ù„Ø§Ø¨ Ø¨ÙŠØ§Ù†Ø§Øª ØªØ¬Ø±ÙŠØ¨ÙŠØ©.",
+  "lb.signin": "Ø³Ø¬Ù‘Ù„ Ø§Ù„Ø¯Ø®ÙˆÙ„ Ù„Ø±Ø¨Ø· Ù†Ù‚Ø§Ø·Ùƒ Ø¨Ø­Ø³Ø§Ø¨Ùƒ ÙˆØ§Ù„Ø¸Ù‡ÙˆØ± ÙÙŠ Ø§Ù„ØªØ±ØªÙŠØ¨.",
+  "lb.signinBtn": "ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„",
+  "lb.you": "Ø£Ù†Øª",
+  "lb.rank": "Ø§Ù„ØªØ±ØªÙŠØ¨",
+  "lb.student": "Ø§Ù„Ø·Ø§Ù„Ø¨",
+  "lb.level": "Ø§Ù„Ù…Ø³ØªÙˆÙ‰",
+  "lb.xp": "Ø§Ù„Ù†Ù‚Ø§Ø·",
+  "lb.all": "ÙƒÙ„ Ø§Ù„Ø£ÙˆÙ‚Ø§Øª",
+  "lb.top5": "Ø£ÙØ¶Ù„ 5",
+  "lb.ranked": "{name}ØŒ ØªØ±ØªÙŠØ¨Ùƒ #{rank} Ø¨Ù€ {xp} Ù†Ù‚Ø·Ø©.",
+  "lb.breakdown": "Ù…Ù† Ø£ÙŠÙ† ØªØ£ØªÙŠ Ù†Ù‚Ø§Ø·Ùƒ",
+  "lb.b.base": "Ø£Ø³Ø§Ø³ Ø§Ù„Ø­Ø³Ø§Ø¨",
+  "lb.b.learning": "Ø§Ù„Ø¯Ø±ÙˆØ³ ÙˆØ§Ù„ÙˆØ§Ø¬Ø¨Ø§Øª ÙˆØ§Ù„ØªØ­Ø¯ÙŠØ§Øª",
+  "lb.b.voice": "Ø¯Ù‚Ø§Ø¦Ù‚ Voicing",
+  "lb.b.hosted": "Ø§Ù„ØºØ±Ù ÙˆØ§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª Ø§Ù„Ù…Ù†Ø´Ø£Ø©",
+  "lb.b.chat": "Ø±Ø³Ø§Ø¦Ù„ Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª",
+};
+
+const catalogs: Record<Locale, Record<SKey, string>> = { en, fr, ar };
+
+export type ST = (key: SKey, vars?: Record<string, string | number>) => string;
+
+export function useS(): ST {
+  const { locale } = useI18n();
+  return (key, vars) => {
+    const tpl = catalogs[locale][key] ?? en[key];
+    return vars
+      ? tpl.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m))
+      : tpl;
+  };
+}
+export const navVoicingLabel: Record<Locale, string> = {
+  en: en["nav.voicing"],
+  fr: fr["nav.voicing"],
+  ar: ar["nav.voicing"],
+};
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\translate.ts =====
+import { en, type MessageKey } from "@/i18n/messages/en";
+import { fr } from "@/i18n/messages/fr";
+import { ar } from "@/i18n/messages/ar";
+import type { Locale } from "@/i18n/config";
+
+export type { MessageKey };
+export type Vars = Record<string, string | number>;
+export type TFunction = (key: MessageKey, vars?: Vars) => string;
+
+const catalogs: Record<Locale, Record<MessageKey, string>> = { en, fr, ar };
+
+/** Looks up a message, falling back to English, then to the key itself. Replaces {name} placeholders. */
+export function translate(locale: Locale, key: MessageKey, vars?: Vars): string {
+  const template = catalogs[locale][key] ?? en[key] ?? key;
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in vars ? String(vars[name]) : match,
+  );
+}
+
+export function makeT(locale: Locale): TFunction {
+  return (key, vars) => translate(locale, key, vars);
+}
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\messages\ar.ts =====
+import type { MessageKey } from "@/i18n/messages/en";
+
+export const ar: Record<MessageKey, string> = {
+  "lang.label": "Ø§Ù„Ù„ØºØ©",
+  "lang.choose": "Ø§Ø®ØªØ± Ù„ØºØªÙƒ",
+  "lang.description": "ØªÙØ³ØªØ®Ø¯Ù… Ù„Ù„Ù‚ÙˆØ§Ø¦Ù… ÙˆØ§Ù„Ø£Ø²Ø±Ø§Ø± ÙˆØ§Ù„Ø±Ø³Ø§Ø¦Ù„ ÙÙŠ COVA.",
+
+  "nav.learn": "ØªØ¹Ù„Ù‘Ù…",
+  "nav.connect": "ØªÙˆØ§ØµÙ„",
+  "nav.account": "Ø§Ù„Ø­Ø³Ø§Ø¨",
+  "nav.dashboard": "Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ…",
+  "nav.courses": "Ø§Ù„Ø¯ÙˆØ±Ø§Øª",
+  "nav.assignments": "Ø§Ù„ÙˆØ§Ø¬Ø¨Ø§Øª",
+  "nav.coding": "Ù…Ø®ØªØ¨Ø± Ø§Ù„Ø¨Ø±Ù…Ø¬Ø©",
+  "nav.challenges": "Ø§Ù„ØªØ­Ø¯ÙŠØ§Øª",
+  "nav.resources": "Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹",
+  "nav.community": "Ø§Ù„Ù…Ø¬ØªÙ…Ø¹",
+  "nav.messages": "Ø§Ù„Ø±Ø³Ø§Ø¦Ù„",
+  "nav.voice": "Ø§Ù„ØµÙˆØª",
+  "nav.groups": "Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª",
+  "nav.leaderboard": "Ù„ÙˆØ­Ø© Ø§Ù„ØµØ¯Ø§Ø±Ø©",
+  "nav.notifications": "Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª",
+  "nav.settings": "Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª",
+  "nav.admin": "Ø§Ù„Ø¥Ø¯Ø§Ø±Ø©",
+  "nav.main": "Ø§Ù„ØªÙ†Ù‚Ù„ Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠ",
+  "nav.open": "ÙØªØ­ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„ØªÙ†Ù‚Ù„",
+  "nav.close": "Ø¥ØºÙ„Ø§Ù‚ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„ØªÙ†Ù‚Ù„",
+  "nav.skip": "Ø§Ù†ØªÙ‚Ù„ Ø¥Ù„Ù‰ Ø§Ù„Ù…Ø­ØªÙˆÙ‰",
+
+  "header.demo": "Ù…Ø³Ø§Ø­Ø© ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+  "header.level": "Ø§Ù„Ù…Ø³ØªÙˆÙ‰ {level} Â· {xp} Ù†Ù‚Ø·Ø© Ø®Ø¨Ø±Ø©",
+  "notif.title": "Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª",
+  "notif.markAll": "ØªØ­Ø¯ÙŠØ¯ Ø§Ù„ÙƒÙ„ ÙƒÙ…Ù‚Ø±ÙˆØ¡",
+  "notif.viewAll": "Ø¹Ø±Ø¶ ÙƒÙ„ Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª",
+  "notif.unread": "Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§ØªØŒ {count} ØºÙŠØ± Ù…Ù‚Ø±ÙˆØ¡Ø©",
+  "user.settings": "Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª",
+  "user.exampleProfile": "Ù…Ù„Ù Ø´Ø®ØµÙŠ ØªØ¬Ø±ÙŠØ¨ÙŠ",
+  "user.reset": "Ø¥Ø¹Ø§Ø¯Ø© Ø¶Ø¨Ø· Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+  "user.resetDone": "ØªÙ…Øª Ø¥Ø¹Ø§Ø¯Ø© Ø¶Ø¨Ø· Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+  "user.signOut": "ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø®Ø±ÙˆØ¬",
+
+  "common.logIn": "ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„",
+  "common.createAccount": "Ø¥Ù†Ø´Ø§Ø¡ Ø­Ø³Ø§Ø¨",
+  "common.cancel": "Ø¥Ù„ØºØ§Ø¡",
+  "common.save": "Ø­ÙØ¸ Ø§Ù„ØªØºÙŠÙŠØ±Ø§Øª",
+  "common.discard": "ØªØ¬Ø§Ù‡Ù„ Ø§Ù„ØªØºÙŠÙŠØ±Ø§Øª",
+  "common.tryAgain": "Ø­Ø§ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰",
+
+  "auth.demoNotice":
+    "Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠ: Ù„Ø§ ÙŠØªÙ… Ø¥Ù†Ø´Ø§Ø¡ Ø­Ø³Ø§Ø¨ Ø­Ù‚ÙŠÙ‚ÙŠ Ø£Ùˆ Ø§Ù„ØªØ­Ù‚Ù‚ Ù…Ù†Ù‡. ÙƒÙ„ Ù…Ø§ ØªØ¯Ø®Ù„Ù‡ ÙŠØ¨Ù‚Ù‰ ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ù…ØªØµÙØ­.",
+  "auth.login.title": "Ù…Ø±Ø­Ø¨Ù‹Ø§ Ø¨Ø¹ÙˆØ¯ØªÙƒ",
+  "auth.login.subtitle": "Ø³Ø¬Ù‘Ù„ Ø§Ù„Ø¯Ø®ÙˆÙ„ Ù„Ù…ÙˆØ§ØµÙ„Ø© Ø§Ù„ØªØ¹Ù„Ù….",
+  "auth.login.submitting": "Ø¬Ø§Ø±Ù ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„",
+  "auth.login.newHere": "Ø¬Ø¯ÙŠØ¯ ÙÙŠ COVAØŸ",
+  "auth.register.title": "Ø£Ù†Ø´Ø¦ Ø­Ø³Ø§Ø¨Ùƒ",
+  "auth.register.subtitle": "Ø§Ù†Ø¶Ù… Ø¥Ù„Ù‰ Ø§Ù„Ù…Ø¬ØªÙ…Ø¹ ÙˆØ§Ø¨Ø¯Ø£ Ø§Ù„ØªØ¹Ù„Ù… Ù…Ø¹ Ø§Ù„Ø¢Ø®Ø±ÙŠÙ†.",
+  "auth.register.submitting": "Ø¬Ø§Ø±Ù Ø¥Ù†Ø´Ø§Ø¡ Ø§Ù„Ø­Ø³Ø§Ø¨",
+  "auth.register.haveAccount": "Ù„Ø¯ÙŠÙƒ Ø­Ø³Ø§Ø¨ Ø¨Ø§Ù„ÙØ¹Ù„ØŸ",
+  "auth.field.name": "Ø§Ù„Ø§Ø³Ù… Ø§Ù„ÙƒØ§Ù…Ù„",
+  "auth.field.email": "Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ",
+  "auth.field.password": "ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±",
+  "auth.field.confirm": "ØªØ£ÙƒÙŠØ¯ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±",
+  "auth.field.passwordHint": "8 Ø£Ø­Ø±Ù Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„ØŒ ØªØªØ¶Ù…Ù† Ø­Ø±ÙÙ‹Ø§ ÙˆØ±Ù‚Ù…Ù‹Ø§.",
+  "auth.field.accept": "Ø£ÙˆØ§ÙÙ‚ Ø¹Ù„Ù‰ Ø£Ù† Ø£ÙƒÙˆÙ† Ù„Ø·ÙŠÙÙ‹Ø§ ÙˆÙ…Ø­ØªØ±Ù…Ù‹Ø§ ÙˆÙ…Ø³Ø§Ø¹Ø¯Ù‹Ø§ ÙÙŠ Ù…Ø¬ØªÙ…Ø¹ COVA.",
+  "auth.err.emailRequired": "Ø£Ø¯Ø®Ù„ Ø¨Ø±ÙŠØ¯Ùƒ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ.",
+  "auth.err.emailInvalid": "Ø£Ø¯Ø®Ù„ Ø¨Ø±ÙŠØ¯Ù‹Ø§ Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠÙ‹Ø§ ØµØ§Ù„Ø­Ù‹Ø§ØŒ Ù…Ø«Ù„ name@school.edu.",
+  "auth.err.passwordRequired": "Ø£Ø¯Ø®Ù„ ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±.",
+  "auth.err.nameShort": "Ø£Ø¯Ø®Ù„ Ø§Ø³Ù…Ùƒ Ø§Ù„ÙƒØ§Ù…Ù„ (Ø­Ø±ÙØ§Ù† Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„).",
+  "auth.err.passwordShort": "Ø§Ø³ØªØ®Ø¯Ù… 8 Ø£Ø­Ø±Ù Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„.",
+  "auth.err.passwordWeak": "Ø£Ø¶Ù Ø­Ø±ÙÙ‹Ø§ ÙˆØ§Ø­Ø¯Ù‹Ø§ ÙˆØ±Ù‚Ù…Ù‹Ø§ ÙˆØ§Ø­Ø¯Ù‹Ø§ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„.",
+  "auth.err.confirmMismatch": "ÙƒÙ„Ù…ØªØ§ Ø§Ù„Ù…Ø±ÙˆØ± ØºÙŠØ± Ù…ØªØ·Ø§Ø¨Ù‚ØªÙŠÙ†.",
+  "auth.err.accept": "ÙˆØ§ÙÙ‚ Ø¹Ù„Ù‰ Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ù…Ø¬ØªÙ…Ø¹ Ù„Ù„Ù…ØªØ§Ø¨Ø¹Ø©.",
+
+  "settings.profile": "Ø§Ù„Ù…Ù„Ù Ø§Ù„Ø´Ø®ØµÙŠ",
+  "settings.profileDesc": "ÙƒÙŠÙ ØªØ¸Ù‡Ø± Ù„Ù„Ø·Ù„Ø§Ø¨ Ø§Ù„Ø¢Ø®Ø±ÙŠÙ†.",
+  "settings.displayName": "Ø§Ù„Ø§Ø³Ù… Ø§Ù„Ù…Ø¹Ø±ÙˆØ¶",
+  "settings.email": "Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ",
+  "settings.bio": "Ù†Ø¨Ø°Ø© Ø¹Ù†Ùƒ",
+  "settings.notifications": "Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª",
+  "settings.emailNotif": "Ø¥Ø´Ø¹Ø§Ø±Ø§Øª Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ",
+  "settings.emailNotifDesc": "ØªÙ„Ù‚ÙŽÙ‘ ØªØ­Ø¯ÙŠØ«Ø§Øª Ø¹Ù† Ø§Ù„ÙˆØ§Ø¬Ø¨Ø§Øª ÙˆØ§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª.",
+  "settings.messageAlerts": "ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ø§Ù„Ø±Ø³Ø§Ø¦Ù„",
+  "settings.messageAlertsDesc": "Ø§Ø­ØµÙ„ Ø¹Ù„Ù‰ Ø¥Ø´Ø¹Ø§Ø± Ø¹Ù†Ø¯Ù…Ø§ ÙŠØ±Ø§Ø³Ù„Ùƒ Ø£Ø­Ø¯.",
+  "settings.digest": "Ø§Ù„Ù…Ù„Ø®Øµ Ø§Ù„Ø£Ø³Ø¨ÙˆØ¹ÙŠ",
+  "settings.digestDesc": "Ù…Ù„Ø®Øµ Ù„ØªÙ‚Ø¯Ù…Ùƒ ÙƒÙ„ ÙŠÙˆÙ… Ø§Ø«Ù†ÙŠÙ†.",
+  "settings.privacy": "Ø§Ù„Ø®ØµÙˆØµÙŠØ©",
+  "settings.visibility": "Ù…Ù† ÙŠÙ…ÙƒÙ†Ù‡ Ø±Ø¤ÙŠØ© Ù…Ù„ÙÙŠ Ø§Ù„Ø´Ø®ØµÙŠ",
+  "settings.vis.everyone": "Ø§Ù„Ø¬Ù…ÙŠØ¹",
+  "settings.vis.groups": "Ø£Ø¹Ø¶Ø§Ø¡ Ù…Ø¬Ù…ÙˆØ¹Ø§ØªÙŠ ÙÙ‚Ø·",
+  "settings.vis.private": "Ø£Ù†Ø§ ÙÙ‚Ø·",
+  "settings.saved": "ØªÙ… Ø­ÙØ¸ Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª",
+  "settings.err.displayName": "Ø£Ø¯Ø®Ù„ Ø§Ø³Ù…Ù‹Ø§ Ù…Ø¹Ø±ÙˆØ¶Ù‹Ø§ Ù…Ù† Ø­Ø±ÙÙŠÙ† Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„.",
+  "settings.err.email": "Ø£Ø¯Ø®Ù„ Ø¨Ø±ÙŠØ¯Ù‹Ø§ Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠÙ‹Ø§ ØµØ§Ù„Ø­Ù‹Ø§.",
+  "settings.demoNotice":
+    "ØªØ¬Ø±ÙŠØ¨ÙŠ ÙÙ‚Ø·: ØªÙØ­ÙØ¸ Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ù…ØªØµÙØ­. Ù„Ø§ ØªÙØ·Ø¨ÙŽÙ‘Ù‚ Ø±Ø³Ø§Ø¦Ù„ Ø§Ù„Ø¨Ø±ÙŠØ¯ ÙˆÙ‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ø®ØµÙˆØµÙŠØ© Ø­ØªÙ‰ ÙŠØªÙˆÙØ± Ø®Ø§Ø¯Ù….",
+
+  "error.title": "Ø­Ø¯Ø« Ø®Ø·Ø£ Ù…Ø§",
+  "error.body": "ØªØ¹Ø°Ù‘Ø± ØªØ­Ù…ÙŠÙ„ Ø§Ù„ØµÙØ­Ø©. Ø­Ø§ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰ØŒ ÙˆØ¥Ø°Ø§ Ø§Ø³ØªÙ…Ø±Øª Ø§Ù„Ù…Ø´ÙƒÙ„Ø© ÙØ£Ø¹Ø¯ ØªØ­Ù…ÙŠÙ„ Ø¹Ù„Ø§Ù…Ø© Ø§Ù„ØªØ¨ÙˆÙŠØ¨.",
+  "error.page.title": "ØªØ¹Ø°Ù‘Ø± ØªØ­Ù…ÙŠÙ„ Ù‡Ø°Ù‡ Ø§Ù„ØµÙØ­Ø©",
+  "error.page.body": "Ø­Ø¯Ø« Ø®Ø·Ø£ ØºÙŠØ± Ù…ØªÙˆÙ‚Ø¹ Ø£Ø«Ù†Ø§Ø¡ Ø¹Ø±Ø¶ Ù‡Ø°Ù‡ Ø§Ù„ØµÙØ­Ø©. Ø­Ø§ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰ Ù„Ø¥Ø¹Ø§Ø¯Ø© ØªØ­Ù…ÙŠÙ„Ù‡Ø§.",
+  "notFound.title": "Ù„Ù… Ù†Ø¹Ø«Ø± Ø¹Ù„Ù‰ Ù‡Ø°Ù‡ Ø§Ù„ØµÙØ­Ø©",
+  "notFound.body": "Ø±Ø¨Ù…Ø§ Ø§Ù„Ø±Ø§Ø¨Ø· Ù‚Ø¯ÙŠÙ…ØŒ Ø£Ùˆ Ø§Ù„Ø¹Ù†ØµØ± ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯ ÙÙŠ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©.",
+  "notFound.cta": "Ø§Ù„Ø§Ù†ØªÙ‚Ø§Ù„ Ø¥Ù„Ù‰ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ…",
+
+  "landing.nav.features": "Ø§Ù„Ù…Ø²Ø§ÙŠØ§",
+  "landing.nav.how": "ÙƒÙŠÙ ØªØ¹Ù…Ù„",
+  "landing.nav.roadmap": "Ø®Ø§Ø±Ø·Ø© Ø§Ù„Ø·Ø±ÙŠÙ‚",
+  "landing.footer.explore": "Ø§Ø³ØªÙƒØ´Ù Ø§Ù„Ù†Ø³Ø®Ø© Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+  "landing.hero.badge": "Ù…Ø¬ØªÙ…Ø¹ Ø·Ù„Ø§Ø¨ÙŠ ÙˆÙ…Ù†ØµØ© ØªØ¹Ù„Ù‘Ù…",
+  "landing.hero.title": "Ù†ØªØ¹Ù„Ù‘Ù… Ù…Ø¹Ù‹Ø§. Ù†Ø¨Ù†ÙŠ Ù…Ø¹Ù‹Ø§. Ù†Ù†Ù…Ùˆ Ù…Ø¹Ù‹Ø§.",
+  "landing.hero.body":
+    "ØªØ¬Ù…Ø¹ COVA Ù…Ø¬Ù…ÙˆØ¹Ø§Øª Ø§Ù„Ø¯Ø±Ø§Ø³Ø© ÙˆØ§Ù„Ø¯ÙˆØ±Ø§Øª ÙˆØªØ¯Ø±ÙŠØ¨ Ø§Ù„Ø¨Ø±Ù…Ø¬Ø© ÙˆÙ…Ø¬ØªÙ…Ø¹Ù‹Ø§ Ø·Ù„Ø§Ø¨ÙŠÙ‹Ø§ ÙˆØ¯ÙˆØ¯Ù‹Ø§ ÙÙŠ Ù…Ø³Ø§Ø­Ø© Ø¹Ù…Ù„ Ù‡Ø§Ø¯Ø¦Ø© ÙˆØ§Ø­Ø¯Ø©.",
+  "landing.hero.cta": "Ø£Ù†Ø´Ø¦ Ø­Ø³Ø§Ø¨Ùƒ",
+  "landing.hero.demo": "Ø§Ø³ØªÙƒØ´Ù Ø§Ù„Ù†Ø³Ø®Ø© Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+  "landing.hero.note": "Ù‡Ø°Ù‡ Ù†Ø³Ø®Ø© ØªØ¬Ø±ÙŠØ¨ÙŠØ© Ù…Ø¨ÙƒØ±Ø©. Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø£Ù…Ø«Ù„Ø© Ù…Ø­ÙÙˆØ¸Ø© ÙÙŠ Ù…ØªØµÙØ­Ùƒ ÙÙ‚Ø·.",
+  "landing.features.title": "ÙƒÙ„ Ù…Ø§ ÙŠØ­ØªØ§Ø¬Ù‡ Ù…Ø¬ØªÙ…Ø¹ Ø§Ù„Ø¯Ø±Ø§Ø³Ø©",
+  "landing.features.body":
+    "ØªØ±ÙƒØ² Ø§Ù„Ù†Ø³Ø®Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ø³Ø§Ø³ÙŠØ§Øª. ÙƒÙ„ Ù‚Ø³Ù… ÙŠØ¹Ù…Ù„ ÙƒÙ†Ø³Ø®Ø© ØªØ¬Ø±ÙŠØ¨ÙŠØ© ØªÙØ§Ø¹Ù„ÙŠØ© ÙŠÙ…ÙƒÙ†Ùƒ ØªØ¬Ø±Ø¨ØªÙ‡Ø§ Ø§Ù„ÙŠÙˆÙ….",
+  "landing.f1.title": "Ø§Ø¹Ø«Ø± Ø¹Ù„Ù‰ Ø£Ù‚Ø±Ø§Ù†Ùƒ",
+  "landing.f1.text": "Ø§ÙƒØªØ´Ù Ø§Ù„Ø·Ù„Ø§Ø¨ Ø­Ø³Ø¨ Ø§Ù„Ù…Ù‡Ø§Ø±Ø© ÙˆØ§Ù„ØªØ®ØµØµ ÙˆØ§Ù„Ø§Ù‡ØªÙ…Ø§Ù…ØŒ Ø«Ù… ØªÙˆØ§ØµÙ„ Ù…Ø¹Ù‡Ù… ÙˆØ±Ø§Ø³Ù„Ù‡Ù….",
+  "landing.f2.title": "Ù…Ø¬Ù…ÙˆØ¹Ø§Øª Ø§Ù„Ø¯Ø±Ø§Ø³Ø© ÙˆØ§Ù„Ù…Ø´Ø§Ø±ÙŠØ¹",
+  "landing.f2.text": "Ø§Ù†Ø¶Ù… Ø¥Ù„Ù‰ Ù…Ø¬Ù…ÙˆØ¹Ø§Øª Ø¨Ø¬Ù„Ø³Ø§Øª Ù…Ø¬Ø¯ÙˆÙ„Ø© ÙˆÙ†Ø´Ø§Ø· Ù…Ø´ØªØ±Ùƒ ÙˆØ£Ù‡Ø¯Ø§Ù ÙˆØ§Ø¶Ø­Ø©.",
+  "landing.f3.title": "Ø§Ù„Ø¯ÙˆØ±Ø§Øª ÙˆØ§Ù„Ù…Ø±Ø§Ø¬Ø¹",
+  "landing.f3.text": "ØªØ§Ø¨Ø¹ Ø¯Ø±ÙˆØ³Ù‹Ø§ Ù…Ù†Ø¸Ù…Ø© ÙˆØ§Ø­ØªÙØ¸ Ø¨Ù…ÙƒØªØ¨Ø© Ù…Ù† Ø§Ù„Ù…Ù„Ø§Ø­Ø¸Ø§Øª ÙˆØ§Ù„Ø£Ø¯Ù„Ø© ÙˆØ§Ù„Ø£Ø¯ÙˆØ§Øª.",
+  "landing.f4.title": "ÙˆØ§Ø¬Ø¨Ø§Øª ÙŠÙ…ÙƒÙ†Ùƒ ØªØªØ¨Ø¹Ù‡Ø§",
+  "landing.f4.text": "Ø§Ø·Ù‘Ù„Ø¹ Ø¹Ù„Ù‰ Ø§Ù„Ù…ÙˆØ§Ø¹ÙŠØ¯ØŒ ÙˆØ³Ù„Ù‘Ù… Ø¹Ù…Ù„ÙƒØŒ ÙˆØ±Ø§Ø¬Ø¹ Ø¯Ø±Ø¬Ø§ØªÙƒ ÙÙŠ Ù‚Ø§Ø¦Ù…Ø© ÙˆØ§Ø­Ø¯Ø©.",
+  "landing.f5.title": "Ù…Ø®ØªØ¨Ø± Ø¨Ø±Ù…Ø¬Ø©",
+  "landing.f5.text": "ØªØ¯Ø±Ù‘Ø¨ ÙÙŠ Ù…Ø³Ø§Ø­Ø© ØªØ´Ø¨Ù‡ Ø§Ù„Ù…Ø­Ø±Ø± Ù…ØµÙ…Ù…Ø© Ù„Ù„ØªÙ…Ø§Ø±ÙŠÙ† Ø§Ù„Ù‚ØµÙŠØ±Ø©.",
+  "landing.f6.title": "ØªØ­Ø¯ÙŠØ§Øª ÙˆÙ†Ù‚Ø§Ø· Ø®Ø¨Ø±Ø© ÙˆØ´Ø§Ø±Ø§Øª",
+  "landing.f6.text": "Ø§ÙƒØ³Ø¨ Ù†Ù‚Ø§Ø·Ù‹Ø§ Ø¨Ø§Ù„ØªØ¹Ù„Ù… ÙˆÙ…Ø³Ø§Ø¹Ø¯Ø© Ø§Ù„Ø¢Ø®Ø±ÙŠÙ†ØŒ ÙˆØªÙ‚Ø¯Ù‘Ù… ÙÙŠ Ù„ÙˆØ­Ø© Ø§Ù„ØµØ¯Ø§Ø±Ø©.",
+  "landing.how.title": "ÙƒÙŠÙ ØªØ¹Ù…Ù„",
+  "landing.s1.title": "Ø£Ù†Ø´Ø¦ Ù…Ù„ÙÙƒ Ø§Ù„Ø´Ø®ØµÙŠ",
+  "landing.s1.text": "Ø£Ø®Ø¨Ø± Ø§Ù„Ù…Ø¬ØªÙ…Ø¹ Ø¨Ù…Ø§ ØªØ¯Ø±Ø³Ù‡ ÙˆÙ…Ø§ ØªØ±ÙŠØ¯ ØªØ¹Ù„Ù…Ù‡.",
+  "landing.s2.title": "Ø§Ù†Ø¶Ù… Ø¥Ù„Ù‰ Ù…Ø¬Ù…ÙˆØ¹Ø© Ø£Ùˆ Ø¯ÙˆØ±Ø©",
+  "landing.s2.text": "Ø§Ø®ØªØ± Ù…Ø¬Ù…ÙˆØ¹Ø© Ø¯Ø±Ø§Ø³Ø© Ø£Ùˆ Ø§Ø¨Ø¯Ø£ Ø¯ÙˆØ±Ø© ØªÙ†Ø§Ø³Ø¨ Ø£Ø³Ø¨ÙˆØ¹Ùƒ.",
+  "landing.s3.title": "ØªØ¹Ù„Ù‘Ù… ÙˆØ§Ø¨Ù†Ù ÙˆØªÙ‚Ø¯Ù‘Ù…",
+  "landing.s3.text": "Ø£Ù†Ù‡Ù Ø§Ù„Ø¯Ø±ÙˆØ³ ÙˆØ§Ù„ØªØ­Ø¯ÙŠØ§ØªØŒ ÙˆØ§Ø·Ù„Ø¨ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯Ø©ØŒ ÙˆØ§ÙƒØ³Ø¨ Ù†Ù‚Ø§Ø· Ø§Ù„Ø®Ø¨Ø±Ø© ÙÙŠ Ø§Ù„Ø·Ø±ÙŠÙ‚.",
+  "landing.later.title": "Ù‚Ø±ÙŠØ¨Ù‹Ø§",
+  "landing.later.body": "Ù‡Ø°Ù‡ Ø§Ù„Ù…Ø²Ø§ÙŠØ§ Ù…Ø®Ø·Ø· Ù„Ù‡Ø§ ÙˆÙ„ÙŠØ³Øª Ø¬Ø²Ø¡Ù‹Ø§ Ù…Ù† Ø§Ù„Ù†Ø³Ø®Ø© Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ© Ø§Ù„Ø­Ø§Ù„ÙŠØ©.",
+  "landing.l1.title": "Ù…Ø³Ø§Ø¹Ø¯ ØªØ¹Ù„Ù‘Ù… Ø¨Ø§Ù„Ø°ÙƒØ§Ø¡ Ø§Ù„Ø§ØµØ·Ù†Ø§Ø¹ÙŠ",
+  "landing.l1.text": "ÙŠØ´Ø±Ø­ Ø§Ù„Ù…ÙØ§Ù‡ÙŠÙ…ØŒ ÙˆÙŠØ®ØªØ¨Ø±ÙƒØŒ ÙˆÙŠÙ‚ØªØ±Ø­ Ù…Ø§ ØªØ¯Ø±Ø³Ù‡ Ø¨Ø¹Ø¯ Ø°Ù„Ùƒ.",
+  "landing.l2.title": "Ø§Ù„ØµÙˆØª ÙˆØ§Ù„ÙÙŠØ¯ÙŠÙˆ ÙˆÙ…Ø´Ø§Ø±ÙƒØ© Ø§Ù„Ø´Ø§Ø´Ø©",
+  "landing.l2.text": "Ø§Ø¯Ø±Ø³ÙˆØ§ Ù…Ø¹Ù‹Ø§ ÙÙŠ Ø§Ù„ÙˆÙ‚Øª Ø§Ù„ÙØ¹Ù„ÙŠ Ø¯ÙˆÙ† Ù…ØºØ§Ø¯Ø±Ø© COVA.",
+  "landing.l3.title": "Ù…Ø±Ø§Ø³Ù„Ø© ÙÙˆØ±ÙŠØ©",
+  "landing.l3.text": "Ù…Ø­Ø§Ø¯Ø«Ø§Øª Ù…Ø¨Ø§Ø´Ø±Ø© ÙˆØ¯Ø±Ø¯Ø´Ø© Ø¬Ù…Ø§Ø¹ÙŠØ© Ø¨Ø¯Ø¹Ù… Ù…Ù† Ø®Ø§Ø¯Ù… Ø­Ù‚ÙŠÙ‚ÙŠ.",
+  "landing.cta.title": "Ù‡Ù„ Ø£Ù†Øª Ù…Ø³ØªØ¹Ø¯ Ù„Ù„Ø§Ø³ØªÙƒØ´Ø§ÙØŸ",
+  "landing.cta.body": "Ø§ÙØªØ­ Ø§Ù„Ù…Ø³Ø§Ø­Ø© Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ© Ù„ØªØ¬Ø±Ø¨Ø© Ø§Ù„Ù…Ø¬Ù…ÙˆØ¹Ø§Øª ÙˆØ§Ù„Ø¯ÙˆØ±Ø§Øª ÙˆØ§Ù„ØªØ­Ø¯ÙŠØ§Øª ÙˆØºÙŠØ±Ù‡Ø§.",
+  "landing.cta.open": "Ø§ÙØªØ­ Ø§Ù„Ù†Ø³Ø®Ø© Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©",
+};
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\messages\en.ts =====
+/** English is the source of truth: other languages must provide every key listed here. */
+export const en = {
+  // Language
+  "lang.label": "Language",
+  "lang.choose": "Choose your language",
+  "lang.description": "Used for menus, buttons and messages across COVA.",
+
+  // Navigation
+  "nav.learn": "Learn",
+  "nav.connect": "Connect",
+  "nav.account": "Account",
+  "nav.dashboard": "Dashboard",
+  "nav.courses": "Courses",
+  "nav.assignments": "Assignments",
+  "nav.coding": "Coding Lab",
+  "nav.challenges": "Challenges",
+  "nav.resources": "Resources",
+  "nav.community": "Community",
+  "nav.messages": "Messages",
+  "nav.voice": "Voice",
+  "nav.groups": "Groups",
+  "nav.leaderboard": "Leaderboard",
+  "nav.notifications": "Notifications",
+  "nav.settings": "Settings",
+  "nav.admin": "Admin",
+  "nav.main": "Main navigation",
+  "nav.open": "Open navigation",
+  "nav.close": "Close navigation",
+  "nav.skip": "Skip to content",
+
+  // Header and menus
+  "header.demo": "Demo workspace",
+  "header.level": "Level {level} Â· {xp} XP",
+  "notif.title": "Notifications",
+  "notif.markAll": "Mark all as read",
+  "notif.viewAll": "View all notifications",
+  "notif.unread": "Notifications, {count} unread",
+  "user.settings": "Settings",
+  "user.exampleProfile": "Example profile",
+  "user.reset": "Reset demo data",
+  "user.resetDone": "Demo data reset",
+  "user.signOut": "Sign out",
+
+  // Common
+  "common.logIn": "Log in",
+  "common.createAccount": "Create account",
+  "common.cancel": "Cancel",
+  "common.save": "Save changes",
+  "common.discard": "Discard changes",
+  "common.tryAgain": "Try again",
+
+  // Auth
+  "auth.demoNotice":
+    "Demo mode: no real account is created or checked. Anything you enter stays in this browser.",
+  "auth.login.title": "Welcome back",
+  "auth.login.subtitle": "Log in to continue learning.",
+  "auth.login.submitting": "Logging in",
+  "auth.login.newHere": "New to COVA?",
+  "auth.register.title": "Create your account",
+  "auth.register.subtitle": "Join the community and start learning together.",
+  "auth.register.submitting": "Creating account",
+  "auth.register.haveAccount": "Already have an account?",
+  "auth.field.name": "Full name",
+  "auth.field.email": "Email",
+  "auth.field.password": "Password",
+  "auth.field.confirm": "Confirm password",
+  "auth.field.passwordHint": "At least 8 characters, with a letter and a number.",
+  "auth.field.accept": "I agree to be kind, respectful and helpful in the COVA community.",
+  "auth.err.emailRequired": "Enter your email address.",
+  "auth.err.emailInvalid": "Enter a valid email address, like name@school.edu.",
+  "auth.err.passwordRequired": "Enter your password.",
+  "auth.err.nameShort": "Enter your full name (at least 2 characters).",
+  "auth.err.passwordShort": "Use at least 8 characters.",
+  "auth.err.passwordWeak": "Include at least one letter and one number.",
+  "auth.err.confirmMismatch": "The passwords don't match.",
+  "auth.err.accept": "Accept the community guidelines to continue.",
+
+  // Settings
+  "settings.profile": "Profile",
+  "settings.profileDesc": "How you appear to other students.",
+  "settings.displayName": "Display name",
+  "settings.email": "Email",
+  "settings.bio": "Bio",
+  "settings.notifications": "Notifications",
+  "settings.emailNotif": "Email notifications",
+  "settings.emailNotifDesc": "Receive updates about assignments and groups.",
+  "settings.messageAlerts": "Message alerts",
+  "settings.messageAlertsDesc": "Get notified when someone messages you.",
+  "settings.digest": "Weekly digest",
+  "settings.digestDesc": "A summary of your progress every Monday.",
+  "settings.privacy": "Privacy",
+  "settings.visibility": "Who can see my profile",
+  "settings.vis.everyone": "Everyone",
+  "settings.vis.groups": "Group members only",
+  "settings.vis.private": "Only me",
+  "settings.saved": "Settings saved",
+  "settings.err.displayName": "Enter a display name of at least 2 characters.",
+  "settings.err.email": "Enter a valid email address.",
+  "settings.demoNotice":
+    "Demo only: settings are saved in this browser. Notification emails and privacy rules are not enforced until a backend exists.",
+
+  // Errors
+  "error.title": "Something went wrong",
+  "error.body":
+    "The page failed to load. Try again, and if it keeps happening, reload the browser tab.",
+  "error.page.title": "This page couldn't load",
+  "error.page.body":
+    "Something unexpected happened while showing this page. Try again to reload it.",
+  "notFound.title": "We couldn't find that page",
+  "notFound.body": "The link may be outdated, or the item may not exist in the demo data.",
+  "notFound.cta": "Go to dashboard",
+
+  // Landing page
+  "landing.nav.features": "Features",
+  "landing.nav.how": "How it works",
+  "landing.nav.roadmap": "Roadmap",
+  "landing.footer.explore": "Explore the demo",
+  "landing.hero.badge": "Student community and learning platform",
+  "landing.hero.title": "Learn together. Build together. Grow together.",
+  "landing.hero.body":
+    "COVA brings study groups, courses, coding practice and a friendly student community into one calm workspace.",
+  "landing.hero.cta": "Create your account",
+  "landing.hero.demo": "Explore the demo",
+  "landing.hero.note": "This is an early demo. Data is sample content saved in your browser only.",
+  "landing.features.title": "Everything a study community needs",
+  "landing.features.body":
+    "The first version focuses on the essentials. Each area works as an interactive demo you can try today.",
+  "landing.f1.title": "Find your people",
+  "landing.f1.text":
+    "Discover students by skill, major and interest, then connect and message them.",
+  "landing.f2.title": "Study and project groups",
+  "landing.f2.text": "Join groups with scheduled sessions, shared activity and clear goals.",
+  "landing.f3.title": "Courses and resources",
+  "landing.f3.text": "Follow structured lessons and keep a library of notes, guides and tools.",
+  "landing.f4.title": "Assignments you can track",
+  "landing.f4.text": "See what is due, submit your work and review grades in one list.",
+  "landing.f5.title": "A coding lab",
+  "landing.f5.text": "Practise in an editor-style workspace built for short exercises.",
+  "landing.f6.title": "Challenges, XP and badges",
+  "landing.f6.text": "Earn points for learning and helping others, and climb the leaderboard.",
+  "landing.how.title": "How it works",
+  "landing.s1.title": "Create your profile",
+  "landing.s1.text": "Tell the community what you study and what you want to learn.",
+  "landing.s2.title": "Join a group or course",
+  "landing.s2.text": "Pick a study group or start a course that fits your week.",
+  "landing.s3.title": "Learn, build and level up",
+  "landing.s3.text": "Finish lessons and challenges, ask for help, and earn XP along the way.",
+  "landing.later.title": "Coming later",
+  "landing.later.body": "These features are planned and not part of the current demo.",
+  "landing.l1.title": "AI learning assistant",
+  "landing.l1.text": "Explain concepts, quiz you and suggest what to study next.",
+  "landing.l2.title": "Voice, video and screen sharing",
+  "landing.l2.text": "Study together in real time without leaving COVA.",
+  "landing.l3.title": "Real-time messaging",
+  "landing.l3.text": "Live conversations and group chat backed by a real server.",
+  "landing.cta.title": "Ready to look around?",
+  "landing.cta.body": "Open the demo workspace to try groups, courses, challenges and more.",
+  "landing.cta.open": "Open the demo",
+} as const;
+
+export type MessageKey = keyof typeof en;
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\i18n\messages\fr.ts =====
+import type { MessageKey } from "@/i18n/messages/en";
+
+export const fr: Record<MessageKey, string> = {
+  "lang.label": "Langue",
+  "lang.choose": "Choisissez votre langue",
+  "lang.description": "UtilisÃ©e pour les menus, boutons et messages dans COVA.",
+
+  "nav.learn": "Apprendre",
+  "nav.connect": "Ã‰changer",
+  "nav.account": "Compte",
+  "nav.dashboard": "Tableau de bord",
+  "nav.courses": "Cours",
+  "nav.assignments": "Devoirs",
+  "nav.coding": "Labo de code",
+  "nav.challenges": "DÃ©fis",
+  "nav.resources": "Ressources",
+  "nav.community": "CommunautÃ©",
+  "nav.messages": "Messages",
+  "nav.voice": "Vocal",
+  "nav.groups": "Groupes",
+  "nav.leaderboard": "Classement",
+  "nav.notifications": "Notifications",
+  "nav.settings": "ParamÃ¨tres",
+  "nav.admin": "Administration",
+  "nav.main": "Navigation principale",
+  "nav.open": "Ouvrir la navigation",
+  "nav.close": "Fermer la navigation",
+  "nav.skip": "Aller au contenu",
+
+  "header.demo": "Espace de dÃ©monstration",
+  "header.level": "Niveau {level} Â· {xp} XP",
+  "notif.title": "Notifications",
+  "notif.markAll": "Tout marquer comme lu",
+  "notif.viewAll": "Voir toutes les notifications",
+  "notif.unread": "Notifications, {count} non lues",
+  "user.settings": "ParamÃ¨tres",
+  "user.exampleProfile": "Profil d'exemple",
+  "user.reset": "RÃ©initialiser les donnÃ©es de dÃ©mo",
+  "user.resetDone": "DonnÃ©es de dÃ©mo rÃ©initialisÃ©es",
+  "user.signOut": "Se dÃ©connecter",
+
+  "common.logIn": "Se connecter",
+  "common.createAccount": "CrÃ©er un compte",
+  "common.cancel": "Annuler",
+  "common.save": "Enregistrer les modifications",
+  "common.discard": "Annuler les modifications",
+  "common.tryAgain": "RÃ©essayer",
+
+  "auth.demoNotice":
+    "Mode dÃ©mo : aucun vrai compte n'est crÃ©Ã© ni vÃ©rifiÃ©. Tout ce que vous saisissez reste dans ce navigateur.",
+  "auth.login.title": "Bon retour",
+  "auth.login.subtitle": "Connectez-vous pour continuer Ã  apprendre.",
+  "auth.login.submitting": "Connexion en cours",
+  "auth.login.newHere": "Nouveau sur COVA ?",
+  "auth.register.title": "CrÃ©ez votre compte",
+  "auth.register.subtitle": "Rejoignez la communautÃ© et apprenez ensemble.",
+  "auth.register.submitting": "CrÃ©ation du compte",
+  "auth.register.haveAccount": "Vous avez dÃ©jÃ  un compte ?",
+  "auth.field.name": "Nom complet",
+  "auth.field.email": "E-mail",
+  "auth.field.password": "Mot de passe",
+  "auth.field.confirm": "Confirmer le mot de passe",
+  "auth.field.passwordHint": "Au moins 8 caractÃ¨res, avec une lettre et un chiffre.",
+  "auth.field.accept":
+    "Je m'engage Ã  Ãªtre bienveillant, respectueux et serviable dans la communautÃ© COVA.",
+  "auth.err.emailRequired": "Saisissez votre adresse e-mail.",
+  "auth.err.emailInvalid": "Saisissez une adresse e-mail valide, comme nom@ecole.edu.",
+  "auth.err.passwordRequired": "Saisissez votre mot de passe.",
+  "auth.err.nameShort": "Saisissez votre nom complet (au moins 2 caractÃ¨res).",
+  "auth.err.passwordShort": "Utilisez au moins 8 caractÃ¨res.",
+  "auth.err.passwordWeak": "Incluez au moins une lettre et un chiffre.",
+  "auth.err.confirmMismatch": "Les mots de passe ne correspondent pas.",
+  "auth.err.accept": "Acceptez les rÃ¨gles de la communautÃ© pour continuer.",
+
+  "settings.profile": "Profil",
+  "settings.profileDesc": "La faÃ§on dont vous apparaissez aux autres Ã©tudiants.",
+  "settings.displayName": "Nom affichÃ©",
+  "settings.email": "E-mail",
+  "settings.bio": "Biographie",
+  "settings.notifications": "Notifications",
+  "settings.emailNotif": "Notifications par e-mail",
+  "settings.emailNotifDesc": "Recevez des nouvelles des devoirs et des groupes.",
+  "settings.messageAlerts": "Alertes de messages",
+  "settings.messageAlertsDesc": "Soyez averti quand quelqu'un vous Ã©crit.",
+  "settings.digest": "RÃ©sumÃ© hebdomadaire",
+  "settings.digestDesc": "Un rÃ©capitulatif de votre progression chaque lundi.",
+  "settings.privacy": "ConfidentialitÃ©",
+  "settings.visibility": "Qui peut voir mon profil",
+  "settings.vis.everyone": "Tout le monde",
+  "settings.vis.groups": "Membres de mes groupes uniquement",
+  "settings.vis.private": "Moi uniquement",
+  "settings.saved": "ParamÃ¨tres enregistrÃ©s",
+  "settings.err.displayName": "Saisissez un nom affichÃ© d'au moins 2 caractÃ¨res.",
+  "settings.err.email": "Saisissez une adresse e-mail valide.",
+  "settings.demoNotice":
+    "DÃ©mo uniquement : les paramÃ¨tres sont enregistrÃ©s dans ce navigateur. Les e-mails et les rÃ¨gles de confidentialitÃ© ne sont pas appliquÃ©s tant qu'il n'y a pas de serveur.",
+
+  "error.title": "Une erreur est survenue",
+  "error.body":
+    "La page n'a pas pu se charger. RÃ©essayez, et si le problÃ¨me persiste, rechargez l'onglet du navigateur.",
+  "error.page.title": "Cette page n'a pas pu se charger",
+  "error.page.body":
+    "Un problÃ¨me inattendu est survenu lors de l'affichage de cette page. RÃ©essayez pour la recharger.",
+  "notFound.title": "Page introuvable",
+  "notFound.body":
+    "Le lien est peut-Ãªtre obsolÃ¨te, ou l'Ã©lÃ©ment n'existe pas dans les donnÃ©es de dÃ©monstration.",
+  "notFound.cta": "Aller au tableau de bord",
+
+  "landing.nav.features": "FonctionnalitÃ©s",
+  "landing.nav.how": "Comment Ã§a marche",
+  "landing.nav.roadmap": "Feuille de route",
+  "landing.footer.explore": "Explorer la dÃ©mo",
+  "landing.hero.badge": "CommunautÃ© Ã©tudiante et plateforme d'apprentissage",
+  "landing.hero.title": "Apprendre ensemble. Construire ensemble. Grandir ensemble.",
+  "landing.hero.body":
+    "COVA rÃ©unit groupes d'Ã©tude, cours, pratique du code et une communautÃ© Ã©tudiante conviviale dans un espace de travail apaisÃ©.",
+  "landing.hero.cta": "CrÃ©er votre compte",
+  "landing.hero.demo": "Explorer la dÃ©mo",
+  "landing.hero.note":
+    "Ceci est une dÃ©mo prÃ©liminaire. Les donnÃ©es sont des exemples enregistrÃ©s uniquement dans votre navigateur.",
+  "landing.features.title": "Tout ce dont une communautÃ© d'Ã©tude a besoin",
+  "landing.features.body":
+    "La premiÃ¨re version se concentre sur l'essentiel. Chaque espace fonctionne comme une dÃ©mo interactive que vous pouvez essayer dÃ¨s aujourd'hui.",
+  "landing.f1.title": "Trouvez vos pairs",
+  "landing.f1.text":
+    "DÃ©couvrez des Ã©tudiants par compÃ©tence, filiÃ¨re et centre d'intÃ©rÃªt, puis Ã©changez avec eux.",
+  "landing.f2.title": "Groupes d'Ã©tude et de projet",
+  "landing.f2.text":
+    "Rejoignez des groupes avec des sessions planifiÃ©es, une activitÃ© partagÃ©e et des objectifs clairs.",
+  "landing.f3.title": "Cours et ressources",
+  "landing.f3.text":
+    "Suivez des leÃ§ons structurÃ©es et gardez une bibliothÃ¨que de notes, guides et outils.",
+  "landing.f4.title": "Des devoirs que vous pouvez suivre",
+  "landing.f4.text":
+    "Voyez ce qui est Ã  rendre, soumettez votre travail et consultez vos notes en une liste.",
+  "landing.f5.title": "Un labo de code",
+  "landing.f5.text": "Pratiquez dans un espace de type Ã©diteur conÃ§u pour de courts exercices.",
+  "landing.f6.title": "DÃ©fis, XP et badges",
+  "landing.f6.text":
+    "Gagnez des points en apprenant et en aidant les autres, et montez dans le classement.",
+  "landing.how.title": "Comment Ã§a marche",
+  "landing.s1.title": "CrÃ©ez votre profil",
+  "landing.s1.text": "Dites Ã  la communautÃ© ce que vous Ã©tudiez et ce que vous voulez apprendre.",
+  "landing.s2.title": "Rejoignez un groupe ou un cours",
+  "landing.s2.text":
+    "Choisissez un groupe d'Ã©tude ou lancez un cours qui s'adapte Ã  votre semaine.",
+  "landing.s3.title": "Apprenez, crÃ©ez et progressez",
+  "landing.s3.text": "Terminez leÃ§ons et dÃ©fis, demandez de l'aide et gagnez de l'XP en chemin.",
+  "landing.later.title": "BientÃ´t",
+  "landing.later.body":
+    "Ces fonctionnalitÃ©s sont prÃ©vues et ne font pas partie de la dÃ©mo actuelle.",
+  "landing.l1.title": "Assistant d'apprentissage IA",
+  "landing.l1.text": "Explique les notions, vous interroge et suggÃ¨re quoi Ã©tudier ensuite.",
+  "landing.l2.title": "Voix, vidÃ©o et partage d'Ã©cran",
+  "landing.l2.text": "Ã‰tudiez ensemble en temps rÃ©el sans quitter COVA.",
+  "landing.l3.title": "Messagerie en temps rÃ©el",
+  "landing.l3.text": "Conversations en direct et discussions de groupe grÃ¢ce Ã  un vrai serveur.",
+  "landing.cta.title": "PrÃªt Ã  jeter un Å“il ?",
+  "landing.cta.body":
+    "Ouvrez l'espace de dÃ©monstration pour essayer groupes, cours, dÃ©fis et plus encore.",
+  "landing.cta.open": "Ouvrir la dÃ©mo",
+};
+
+
+===== C:\Users\hay info\Downloads\cova\cova-web-app\src\components\settings\SettingsForm.tsx =====
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/Button";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { DemoNotice } from "@/components/ui/DemoNotice";
+import { SelectFilter, TextAreaField, TextField } from "@/components/ui/FormField";
+import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { Switch } from "@/components/ui/Switch";
+import { useToast } from "@/components/ui/Toast";
+import { useT } from "@/i18n/client";
+import type { MessageKey } from "@/i18n/translate";
+import { demoActions, useDemoState, useHydrated } from "@/lib/demo-store";
+import type { UserSettings } from "@/types";
+
+const visibilityKeys: Record<UserSettings["profileVisibility"], MessageKey> = {
+  everyone: "settings.vis.everyone",
+  groups: "settings.vis.groups",
+  private: "settings.vis.private",
+};
+
+function SettingsFormInner({ initial }: { initial: UserSettings }) {
+  const toast = useToast();
+  const t = useT();
+  const visibilityLabels = Object.fromEntries(
+    Object.entries(visibilityKeys).map(([k, key]) => [k, t(key)]),
+  ) as Record<UserSettings["profileVisibility"], string>;
+  const [values, setValues] = useState(initial);
+  const [errors, setErrors] = useState<{ displayName?: string; email?: string }>({});
+  const set = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) =>
+    setValues((v) => ({ ...v, [key]: value }));
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    const found: typeof errors = {};
+    if (values.displayName.trim().length < 2) found.displayName = t("settings.err.displayName");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.email.trim()))
+      found.email = t("settings.err.email");
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
+    demoActions.saveSettings({
+      ...values,
+      displayName: values.displayName.trim(),
+      email: values.email.trim(),
+    });
+    toast.push(t("settings.saved"));
+  }
+
+  return (
+    <form onSubmit={onSubmit} noValidate className="max-w-2xl space-y-6">
+      <Card>
+        <CardHeader title={t("settings.profile")} description={t("settings.profileDesc")} />
+        <CardBody className="space-y-4">
+          <TextField
+            id="displayName"
+            label={t("settings.displayName")}
+            value={values.displayName}
+            error={errors.displayName}
+            onChange={(e) => set("displayName", e.target.value)}
+          />
+          <TextField
+            id="settings-email"
+            label={t("settings.email")}
+            type="email"
+            value={values.email}
+            error={errors.email}
+            onChange={(e) => set("email", e.target.value)}
+          />
+          <TextAreaField
+            id="bio"
+            label={t("settings.bio")}
+            value={values.bio}
+            onChange={(e) => set("bio", e.target.value)}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title={t("lang.label")} description={t("lang.description")} />
+        <CardBody>
+          <LanguageSwitcher />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title={t("settings.notifications")} />
+        <CardBody className="divide-y divide-cova-line py-2">
+          <Switch
+            label={t("settings.emailNotif")}
+            description={t("settings.emailNotifDesc")}
+            checked={values.emailNotifications}
+            onChange={(v) => set("emailNotifications", v)}
+          />
+          <Switch
+            label={t("settings.messageAlerts")}
+            description={t("settings.messageAlertsDesc")}
+            checked={values.messageAlerts}
+            onChange={(v) => set("messageAlerts", v)}
+          />
+          <Switch
+            label={t("settings.digest")}
+            description={t("settings.digestDesc")}
+            checked={values.weeklyDigest}
+            onChange={(v) => set("weeklyDigest", v)}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title={t("settings.privacy")} />
+        <CardBody>
+          <SelectFilter
+            label={t("settings.visibility")}
+            options={Object.values(visibilityLabels)}
+            value={visibilityLabels[values.profileVisibility]}
+            onChange={(e) => {
+              const key = (Object.keys(visibilityKeys) as UserSettings["profileVisibility"][]).find(
+                (k) => visibilityLabels[k] === e.target.value,
+              );
+              if (key) set("profileVisibility", key);
+            }}
+          />
+        </CardBody>
+      </Card>
+
+      <DemoNotice>{t("settings.demoNotice")}</DemoNotice>
+      <div className="flex gap-2">
+        <Button type="submit">{t("common.save")}</Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setValues(initial);
+            setErrors({});
+          }}
+        >
+          {t("common.discard")}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+export function SettingsForm() {
+  const { settings } = useDemoState();
+  const hydrated = useHydrated();
+  // Re-mount once the saved browser state has loaded so the form starts from saved values.
+  return <SettingsFormInner key={hydrated ? "ready" : "loading"} initial={settings} />;
+}
+
