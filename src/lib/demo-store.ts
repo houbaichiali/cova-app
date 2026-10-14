@@ -1,6 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type { AssignmentStatus, ChatMessage, DemoSession, UserSettings } from "@/types";
-
 /**
  * Lightweight DEMO persistence. State lives in this browser's localStorage only.
  * It is NOT a database, there is no sync between devices or users, and it will be
@@ -117,14 +116,13 @@ export function useDemoState(): DemoState {
 }
 
 /** False during server render and hydration, true after the client mounts. */
+
 export function useHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    setHydrated(true);
-  }, []);
-
-  return hydrated;
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 }
 
 export const demoActions = {
