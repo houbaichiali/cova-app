@@ -44,7 +44,7 @@ export const authActions = {
     const { data, error } = await getSupabase().auth.signUp({
       email,
       password: input.password,
-      options: { data: { display_name: displayName.slice(0, 60) } },
+      options: { data: { name: displayName.slice(0, 60) } },
     });
     if (error) return fail(friendly(error.message));
     return ok({ needsEmailConfirmation: !data.session });
