@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -12,7 +11,7 @@ import { UpcomingAssignments } from "@/components/dashboard/UpcomingAssignments"
 import { DailyChallengeCard } from "@/components/dashboard/DailyChallengeCard";
 import { SuggestedGroups } from "@/components/dashboard/SuggestedGroups";
 import { useDemoState } from "@/lib/demo-store";
-import { buildLeaderboard, computeXp, levelFor } from "@/lib/progress";
+import { levelFor } from "@/lib/progress";
 import { getSupabase } from "@/lib/supabase/client";
 
 type RealProfile = {
@@ -22,10 +21,23 @@ type RealProfile = {
   xp: number | null;
 };
 
+type LeaderboardEntry = {
+  user_code: string | null;
+  rank: number | null;
+};
+
 export function DashboardView() {
   const state = useDemoState();
+
   const [profile, setProfile] = useState<RealProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [leaderboardRank, setLeaderboardRank] = useState<number | null>(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
+
+  // Données réelles de progression provenant de Supabase.
+  const [enrolledCourses, setEnrolledCourses] = useState<string[]>([]);
+  const [completedLessons, setCompletedLessons] = useState<string[]>([]);
+  const [learningLoading, setLearningLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -33,11 +45,14 @@ export function DashboardView() {
     async function loadProfile() {
       try {
         const supabase = getSupabase();
+
         const { data: authData, error: authError } =
           await supabase.auth.getUser();
 
-        if (authError || !authData.user) {
-          if (active) setProfileLoading(false);
+        if (authError) throw authError;
+
+        if (!authData.user) {
+          if (active) setProfile(null);
           return;
         }
 
@@ -47,16 +62,13 @@ export function DashboardView() {
           .eq("id", authData.user.id)
           .maybeSingle();
 
-        if (error) {
-          console.error("Erreur de chargement du profil :", error.message);
-          return;
-        }
+        if (error) throw error;
 
         if (active) {
           setProfile(data as RealProfile | null);
         }
       } catch (error) {
-        console.error("Impossible de charger le profil Supabase :", error);
+        console.error("Erreur de chargement du profil :", error);
       } finally {
         if (active) setProfileLoading(false);
       }
@@ -69,8 +81,136 @@ export function DashboardView() {
     };
   }, []);
 
-  const demoXp = computeXp(state);
-  const xp = profile?.xp ?? demoXp;
+  // Charge les inscriptions et les leçons terminées depuis Supabase.
+  useEffect(() => {
+    let active = true;
+
+    async function loadLearningProgress() {
+      setLearningLoading(true);
+
+      try {
+        const supabase = getSupabase();
+
+        const { data: authData, error: authError } =
+          await supabase.auth.getUser();
+
+        if (authError) throw authError;
+
+        if (!authData.user) {
+          if (active) {
+            setEnrolledCourses([]);
+            setCompletedLessons([]);
+          }
+          return;
+        }
+
+        const userId = authData.user.id;
+
+        const [enrollmentResult, lessonResult] = await Promise.all([
+          supabase
+            .from("course_enrollments")
+            .select("course_id")
+            .eq("user_id", userId),
+
+          supabase
+            .from("lesson_completions")
+            .select("lesson_id")
+            .eq("user_id", userId),
+        ]);
+
+        if (enrollmentResult.error) throw enrollmentResult.error;
+        if (lessonResult.error) throw lessonResult.error;
+
+        if (active) {
+          setEnrolledCourses(
+            (enrollmentResult.data ?? []).map((row) => row.course_id),
+          );
+
+          setCompletedLessons(
+            (lessonResult.data ?? []).map((row) => row.lesson_id),
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Erreur de chargement de la progression des cours :",
+          error,
+        );
+      } finally {
+        if (active) setLearningLoading(false);
+      }
+    }
+
+    void loadLearningProgress();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLeaderboard() {
+      try {
+        const supabase = getSupabase();
+
+        const { data: authData, error: authError } =
+          await supabase.auth.getUser();
+
+        if (authError || !authData.user) {
+          return;
+        }
+
+        const { data: userProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("user_code")
+          .eq("id", authData.user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error(
+            "Erreur de lecture du code COVA :",
+            profileError.message,
+          );
+          return;
+        }
+
+        if (!userProfile?.user_code) return;
+
+        const { data, error } = await supabase
+          .from("leaderboard")
+          .select("user_code, rank")
+          .eq("user_code", userProfile.user_code)
+          .maybeSingle();
+
+        if (error) {
+          console.error(
+            "Erreur de chargement du classement :",
+            error.message,
+          );
+          return;
+        }
+
+        const entry = data as LeaderboardEntry | null;
+
+        if (active && entry?.rank != null) {
+          setLeaderboardRank(Number(entry.rank));
+        }
+      } catch (error) {
+        console.error("Impossible de charger le classement :", error);
+      } finally {
+        if (active) setLeaderboardLoading(false);
+      }
+    }
+
+    void loadLeaderboard();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const xp = profile?.xp ?? 0;
   const { level, into, needed } = levelFor(xp);
 
   const displayName =
@@ -79,9 +219,6 @@ export function DashboardView() {
     state.settings.displayName;
 
   const firstName = displayName.split(" ")[0];
-
-  const rank =
-    buildLeaderboard(xp, displayName).find((r) => r.isMe)?.rank ?? 0;
 
   return (
     <>
@@ -130,14 +267,28 @@ export function DashboardView() {
         <StatCard
           icon={Trophy}
           label="Leaderboard rank"
-          value={`#${rank}`}
-          detail="among demo students"
+          value={
+            leaderboardLoading
+              ? "..."
+              : leaderboardRank !== null
+                ? `#${leaderboardRank}`
+                : "—"
+          }
+          detail={
+            leaderboardLoading
+              ? "Loading ranking..."
+              : leaderboardRank !== null
+                ? "Your real COVA ranking"
+                : "Ranking unavailable"
+          }
         />
 
         <StatCard
           icon={BookOpen}
           label="Lessons completed"
-          value={String(state.completedLessons.length)}
+          value={
+            learningLoading ? "..." : String(completedLessons.length)
+          }
         />
 
         <StatCard
@@ -149,10 +300,21 @@ export function DashboardView() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <ContinueLearning
-            enrolled={state.enrolledCourses}
-            completedLessons={state.completedLessons}
-          />
+          {learningLoading ? (
+            <Card>
+              <CardBody>
+                <p className="text-sm text-cova-mute">
+                  Loading your learning progress...
+                </p>
+              </CardBody>
+            </Card>
+          ) : (
+            <ContinueLearning
+              enrolled={enrolledCourses}
+              completedLessons={completedLessons}
+            />
+          )}
+
           <UpcomingAssignments state={state} />
         </div>
 

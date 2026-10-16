@@ -1,11 +1,24 @@
+
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { buttonStyles } from "@/components/ui/Button";
-import { courses } from "@/data/courses";
-import { courseProgress } from "@/lib/progress";
+import { getSupabase } from "@/lib/supabase/client";
+
+type DashboardCourse = {
+  id: string;
+  title: string;
+};
+
+type DashboardLesson = {
+  id: string;
+  course_id: string;
+};
 
 export function ContinueLearning({
   enrolled,
@@ -14,19 +27,85 @@ export function ContinueLearning({
   enrolled: string[];
   completedLessons: string[];
 }) {
-  const active = courses.filter((c) => enrolled.includes(c.id));
+  const [activeCourses, setActiveCourses] = useState<DashboardCourse[]>([]);
+  const [lessons, setLessons] = useState<DashboardLesson[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCourses() {
+      setLoading(true);
+
+      if (enrolled.length === 0) {
+        setActiveCourses([]);
+        setLessons([]);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const supabase = getSupabase();
+
+        const { data: courseData, error: courseError } = await supabase
+          .from("courses")
+          .select("id, title")
+          .in("id", enrolled);
+
+        if (courseError) throw courseError;
+
+        const { data: lessonData, error: lessonError } = await supabase
+          .from("course_lessons")
+          .select("id, course_id")
+          .in("course_id", enrolled);
+
+        if (lessonError) throw lessonError;
+
+        if (active) {
+          setActiveCourses((courseData ?? []) as DashboardCourse[]);
+          setLessons((lessonData ?? []) as DashboardLesson[]);
+        }
+      } catch (error) {
+        console.error("Erreur de chargement des cours du Dashboard :", error);
+
+        if (active) {
+          setActiveCourses([]);
+          setLessons([]);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadCourses();
+
+    return () => {
+      active = false;
+    };
+  }, [enrolled]);
+
+  const completedSet = new Set(completedLessons);
+
   return (
     <Card>
       <CardHeader
         title="Continue learning"
         action={
-          <Link href="/courses" className="text-sm font-medium underline-offset-2 hover:underline">
+          <Link
+            href="/courses"
+            className="text-sm font-medium underline-offset-2 hover:underline"
+          >
             All courses
           </Link>
         }
       />
+
       <CardBody>
-        {active.length === 0 ? (
+        {loading ? (
+          <p className="text-sm text-cova-mute">
+            Loading your courses...
+          </p>
+        ) : activeCourses.length === 0 ? (
           <EmptyState
             icon={BookOpen}
             title="No courses yet"
@@ -39,19 +118,40 @@ export function ContinueLearning({
           />
         ) : (
           <ul className="space-y-5">
-            {active.map((c) => {
-              const p = courseProgress(c, completedLessons);
+            {activeCourses.map((course) => {
+              const courseLessons = lessons.filter(
+                (lesson) => lesson.course_id === course.id,
+              );
+
+              const done = courseLessons.filter((lesson) =>
+                completedSet.has(lesson.id),
+              ).length;
+
+              const total = courseLessons.length;
+              const percentage =
+                total > 0 ? Math.round((done / total) * 100) : 0;
+
               return (
-                <li key={c.id}>
+                <li key={course.id}>
                   <div className="flex items-baseline justify-between gap-3">
-                    <Link href={`/courses/${c.id}`} className="font-medium hover:underline">
-                      {c.title}
+                    <Link
+                      href={`/courses/${course.id}`}
+                      className="font-medium hover:underline"
+                    >
+                      {course.title}
                     </Link>
+
                     <span className="shrink-0 text-xs text-cova-mute">
-                      {p.done} of {p.total} lessons
+                      {done} of {total} lessons
                     </span>
                   </div>
-                  <ProgressBar value={p.pct} label={`${c.title} progress`} className="mt-2" />
+
+                  <ProgressBar
+                    value={percentage}
+                    max={100}
+                    label={`${course.title} progress`}
+                    className="mt-2"
+                  />
                 </li>
               );
             })}

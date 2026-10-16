@@ -51,6 +51,7 @@ export interface Lesson {
   minutes: number;
   type: LessonType;
   summary: string;
+  content?: string;
 }
 
 export type CourseLevel = "Beginner" | "Intermediate" | "Advanced";
