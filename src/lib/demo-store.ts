@@ -116,13 +116,13 @@ export function useDemoState(): DemoState {
 }
 
 /** False during server render and hydration, true after the client mounts. */
-
 export function useHydrated(): boolean {
   return useSyncExternalStore(
     () => () => {},
     () => true,
     () => false,
   );
+}
 }
 
 export const demoActions = {
