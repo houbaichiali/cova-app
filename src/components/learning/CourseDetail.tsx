@@ -93,14 +93,16 @@ export function CourseDetail({ course }: { course: Course }) {
   const related = assignments.filter((a) => a.courseId === course.id);
   const progress = courseProgress({ ...course, lessons }, completedLessons);
 
-  useEffect(() => {
-    setLessons(course.lessons);
-    setOpenLesson(course.lessons[0]?.id ?? null);
+    useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setLessons(course.lessons);
+      setOpenLesson(course.lessons[0]?.id ?? null);
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [course.id, course.lessons]);
 
   const loadProgress = useCallback(async () => {
-    setLoading(true);
-
     try {
       const supabase = getSupabase();
       const { data: authData, error: authError } =
@@ -190,8 +192,12 @@ export function CourseDetail({ course }: { course: Course }) {
     }
   }, [course.id, toast]);
 
-  useEffect(() => {
-    void loadProgress();
+    useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      void loadProgress();
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [loadProgress]);
 
   function openContentEditor(kind: ContentKind) {
@@ -340,9 +346,11 @@ export function CourseDetail({ course }: { course: Course }) {
       return;
     }
 
-    if (submissions.some(
-      (item) => item.lesson_id === lesson.id && item.student_id === userId,
-    )) {
+    if (
+      submissions.some(
+        (item) => item.lesson_id === lesson.id && item.student_id === userId,
+      )
+    ) {
       toast.push("You have already submitted this TP.");
       return;
     }
@@ -1129,9 +1137,7 @@ export function CourseDetail({ course }: { course: Course }) {
                                   </p>
                                   <Button
                                     type="submit"
-                                    disabled={
-                                      savingSubmission === lesson.id
-                                    }
+                                    disabled={savingSubmission === lesson.id}
                                   >
                                     {savingSubmission === lesson.id
                                       ? "Submitting..."

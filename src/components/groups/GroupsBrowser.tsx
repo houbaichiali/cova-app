@@ -81,9 +81,13 @@ export function GroupsBrowser() {
     }
   }, []);
 
-  useEffect(() => {
+ useEffect(() => {
+  const frame = requestAnimationFrame(() => {
     void loadGroups();
-  }, [loadGroups]);
+  });
+
+  return () => cancelAnimationFrame(frame);
+}, [loadGroups]);
 
   // Créer un groupe dans spaces
   const createGroup = async (

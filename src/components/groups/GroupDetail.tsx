@@ -149,9 +149,12 @@ export function GroupDetail({ code }: { code: string }) {
   }, [code, loadMessages]);
 
   useEffect(() => {
+  const frame = requestAnimationFrame(() => {
     void loadGroup();
-  }, [loadGroup]);
+  });
 
+  return () => cancelAnimationFrame(frame);
+}, [loadGroup]);
   // Actualiser les publications en temps réel
   useEffect(() => {
     if (!group || !role) return;
