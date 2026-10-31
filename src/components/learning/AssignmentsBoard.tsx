@@ -116,7 +116,6 @@ export function AssignmentsBoard() {
       }
     }, 0);
     return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- read the deep link once on mount
   }, []);
 
   async function openCreateForm() {

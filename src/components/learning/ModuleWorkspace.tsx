@@ -12,7 +12,6 @@ import { TextAreaField, TextField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
-import type { LessonBlock } from "@/components/learning/lesson-blocks";
 
 interface LessonRow {
   id: string;
@@ -84,7 +83,7 @@ export function ModuleWorkspace({ courseId }: { courseId: string }) {
     try {
       const supabase = getSupabase();
       const position = (lessons?.length ?? 0) + 1;
-      const contentBlocks: LessonBlock[] = lessonType === "native" ? [] : [];
+      
       const { data, error } = await supabase
         .from("lessons")
         .insert({
@@ -95,7 +94,7 @@ export function ModuleWorkspace({ courseId }: { courseId: string }) {
           lesson_type: lessonType,
           position,
           lesson_status: "draft",
-          content_blocks: contentBlocks,
+          content_blocks: [],
           objectives: objectives.trim(),
           duration_minutes: duration ? Number(duration) : null,
         })

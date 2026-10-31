@@ -2,27 +2,24 @@
 
 import type { ReactNode } from "react";
 
-/** One content block of a native COVA lesson (saved in lessons.content_blocks). */
-export type LessonBlockType = "h1" | "h2" | "h3" | "p" | "ul" | "ol" | "table";
-
-export interface LessonBlock {
+/**
+ * A native lesson is an ordered list of SECTIONS. Each section has an
+ * independent title (used by the reading navigation when non-empty) and its own
+ * rich content — the two are never merged. Saved in the lesson_sections table.
+ */
+export interface LessonSection {
+  /** Stable editor-generated UUID: also the HTML anchor of the section. */
   id: string;
-  type: LessonBlockType;
-  /** Inline HTML for text blocks (teacher-authored, sanitized on save). */
-  html?: string;
-  /** Cell grid for table blocks. */
-  rows?: string[][];
+  title: string;
+  html: string;
 }
 
-export function newBlock(type: LessonBlockType): LessonBlock {
-  const base: LessonBlock = { id: crypto.randomUUID(), type };
-  if (type === "table") {
-    base.rows = [
-      ["", "", ""],
-      ["", "", ""],
-    ];
-  }
-  return base;
+export function newSection(): LessonSection {
+  return { id: crypto.randomUUID(), title: "", html: "" };
+}
+
+export function sectionAnchor(id: string): string {
+  return `section-${id}`;
 }
 
 /** Teacher-authored HTML: drop scripts and inline handlers before saving/rendering. */
@@ -40,73 +37,28 @@ export function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").trim();
 }
 
-export interface TocEntry {
-  blockId: string;
-  level: 1 | 2 | 3;
-  number: string;
-  text: string;
+/** The navigation entries: titled sections only, in saved order. */
+export function titledSections(sections: LessonSection[]): Array<{ id: string; anchor: string; title: string }> {
+  return sections
+    .filter((section) => section.title.trim().length > 0)
+    .map((section) => ({ id: section.id, anchor: sectionAnchor(section.id), title: section.title.trim() }));
 }
 
-/** Numbered outline from the heading blocks (1, 1.1, 1.2, 2, ...). */
-export function buildToc(blocks: LessonBlock[]): TocEntry[] {
-  const counters = [0, 0, 0];
-  const entries: TocEntry[] = [];
-  for (const block of blocks) {
-    if (block.type !== "h1" && block.type !== "h2" && block.type !== "h3") continue;
-    const level = Number(block.type[1]) as 1 | 2 | 3;
-    counters[level - 1] = (counters[level - 1] ?? 0) + 1;
-    for (let deeper = level; deeper < 3; deeper += 1) counters[deeper] = 0;
-    const text = stripHtml(block.html ?? "") || "…";
-    const number = level === 1 ? `${counters[0]}` : `${counters.slice(0, level).join(".")}`;
-    entries.push({ blockId: block.id, level, number, text });
-  }
-  return entries;
+function renderContent(html: string): ReactNode {
+  return <div className="lesson-content" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />;
 }
 
-function renderList(html: string, ordered: boolean): ReactNode {
-  // The contentEditable already produced <li>…</li> fragments inside the block.
-  const inner = { __html: sanitizeHtml(html) };
-  return ordered
-    ? <ol className="my-2 list-decimal space-y-1 ps-6" dangerouslySetInnerHTML={inner} />
-    : <ul className="my-2 list-disc space-y-1 ps-6" dangerouslySetInnerHTML={inner} />;
-}
-
-/** Read-only rendering of the lesson blocks (student reading view). */
-export function LessonBlocksView({ blocks }: { blocks: LessonBlock[] }) {
+/** Read-only rendering of every section, each with a stable anchor id. */
+export function LessonSectionsView({ sections }: { sections: LessonSection[] }) {
   return (
-    <div className="space-y-1">
-      {blocks.map((block) => {
-        if (block.type === "table") {
-          const rows = block.rows ?? [];
-          const [head = [], ...body] = rows;
-          return (
-            <table key={block.id} className="my-4 w-full border-collapse text-sm">
-              {head.length > 0 && (
-                <thead>
-                  <tr>{head.map((cell, cellIndex) => <th key={cellIndex} className="border border-cova-line bg-cova-bg px-3 py-2 text-start font-semibold">{cell}</th>)}</tr>
-                </thead>
-              )}
-              <tbody>
-                {body.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    {row.map((cell, cellIndex) => <td key={cellIndex} className="border border-cova-line px-3 py-2 align-top">{cell}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          );
-        }
-        const inner = { __html: sanitizeHtml(block.html ?? "") };
-        switch (block.type) {
-          case "h1": return <h2 key={block.id} data-bid={block.id} className="mt-6 scroll-mt-24 text-2xl font-semibold" dangerouslySetInnerHTML={inner} />;
-          case "h2": return <h3 key={block.id} data-bid={block.id} className="mt-5 scroll-mt-24 text-xl font-semibold" dangerouslySetInnerHTML={inner} />;
-          case "h3": return <h4 key={block.id} data-bid={block.id} className="mt-4 scroll-mt-24 text-lg font-semibold" dangerouslySetInnerHTML={inner} />;
-          case "ul": return <div key={block.id}>{renderList(block.html ?? "", false)}</div>;
-          case "ol": return <div key={block.id}>{renderList(block.html ?? "", true)}</div>;
-          default: return <p key={block.id} className="my-3 leading-7" dangerouslySetInnerHTML={inner} />;
-        }
-      })}
-      {blocks.length === 0 && <p className="my-3 text-sm text-cova-mute">…</p>}
-    </div>
+    <article className="lesson-content">
+      {sections.map((section) => (
+        <section key={section.id} id={sectionAnchor(section.id)} className="scroll-mt-24 border-b border-cova-line py-4 first:pt-0 last:border-b-0">
+          {section.title.trim() && <h2 className="mb-2 text-2xl font-semibold">{section.title}</h2>}
+          {renderContent(section.html)}
+        </section>
+      ))}
+      {sections.length === 0 && <p className="text-sm text-cova-mute">…</p>}
+    </article>
   );
 }

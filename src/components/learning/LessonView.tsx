@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardBody } from "@/components/ui/Card";
 import { useT } from "@/i18n/client";
-import { buildToc, LessonBlocksView, type LessonBlock } from "@/components/learning/lesson-blocks";
+import { LessonSectionsView, titledSections, type LessonSection } from "@/components/learning/lesson-blocks";
 import { LessonFilesManager } from "@/components/learning/LessonFilesManager";
 
 export interface LessonMeta {
@@ -18,53 +18,51 @@ export interface LessonMeta {
   lesson_type: "external" | "native";
   position: number;
   lesson_status: string;
-  content_blocks: LessonBlock[];
+  content_blocks: unknown[];
   objectives: string | null;
   duration_minutes: number | null;
 }
 
-/** Reading view for one lesson: native content with the outline on the right,
- *  or the external files, plus previous/next navigation. */
+/** Dedicated reading page for one lesson: sections on the left, the titled
+ *  sections as real anchor links (#section-<id>) on the right, previous/next. */
 export function LessonView({
   courseTitle,
   lesson,
+  sections,
   previous,
   next,
   isOwner,
 }: {
   courseTitle: string;
   lesson: LessonMeta;
+  sections: LessonSection[];
   previous: { id: string; title: string } | null;
   next: { id: string; title: string } | null;
   isOwner: boolean;
 }) {
   const t = useT();
-  const [activeHeading, setActiveHeading] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const toc = useMemo(() => buildToc(lesson.content_blocks ?? []), [lesson.content_blocks]);
+  const outline = useMemo(() => titledSections(sections), [sections]);
   const native = lesson.lesson_type === "native";
 
-  // Scroll spy: highlight the heading closest to the top of the viewport.
+  // Scroll-spy: the section covering the top of the viewport is the active one.
   useEffect(() => {
-    if (!native) return;
-    function onScroll() {
-      let current: string | null = null;
-      for (const entry of toc) {
-        const element = document.querySelector(`[data-bid="${entry.blockId}"]`);
-        if (element && element.getBoundingClientRect().top < 140) current = entry.blockId;
-      }
-      setActiveHeading(current);
+    if (!native || outline.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) setActiveId(entry.target.id);
+        }
+      },
+      { rootMargin: "-96px 0px -55% 0px", threshold: 0 },
+    );
+    for (const entry of outline) {
+      const element = document.getElementById(entry.anchor);
+      if (element) observer.observe(element);
     }
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [native, toc]);
-
-  function goTo(entryBlockId: string) {
-    setActiveHeading(entryBlockId);
-    document.querySelector(`[data-bid="${entryBlockId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setOutlineOpen(false);
-  }
+    return () => observer.disconnect();
+  }, [native, outline]);
 
   return (
     <div className="space-y-4">
@@ -94,43 +92,50 @@ export function LessonView({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
           <Card>
             <CardBody>
-              <LessonBlocksView blocks={lesson.content_blocks ?? []} />
+              <LessonSectionsView sections={sections} />
             </CardBody>
           </Card>
-          <aside className="lg:sticky lg:top-24">
-            <button type="button" className="mb-2 w-full rounded-lg border border-cova-line bg-white px-3 py-2 text-sm font-medium lg:hidden" onClick={() => setOutlineOpen((open) => !open)}>
+          <aside className="lg:sticky lg:top-24 lg:self-start">
+            <button
+              type="button"
+              className="mb-2 w-full rounded-lg border border-cova-line bg-white px-3 py-2 text-sm font-medium lg:hidden"
+              aria-expanded={outlineOpen}
+              onClick={() => setOutlineOpen((open) => !open)}
+            >
               {t("lessons.editor.outline")}
             </button>
-            <Card className={outlineOpen ? "" : "hidden lg:block"}>
-              <CardBody>
-                <h2 className="mb-2 text-sm font-semibold">{t("lessons.editor.outline")}</h2>
-                {toc.length === 0 ? (
-                  <p className="text-sm text-cova-mute">{t("lessons.editor.outlineEmpty")}</p>
-                ) : (
-                  <ul className="max-h-96 space-y-1 overflow-y-auto text-sm">
-                    {toc.map((entry) => (
-                      <li key={entry.blockId} style={{ paddingInlineStart: `${(entry.level - 1) * 0.9}rem` }}>
-                        <button
-                          type="button"
-                          onClick={() => goTo(entry.blockId)}
-                          className={`w-full truncate rounded px-2 py-1 text-start hover:bg-cova-bg ${activeHeading === entry.blockId ? "bg-cova-pale font-semibold" : entry.level === 1 ? "font-semibold" : "text-cova-mute"}`}
-                        >
-                          <span className="me-1.5 font-mono text-xs text-cova-muted">{entry.number}</span>
-                          {entry.text}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardBody>
-            </Card>
+            <nav aria-label={t("lessons.editor.outline")} className={outlineOpen ? "" : "hidden lg:block"}>
+              <Card>
+                <CardBody>
+                  <h2 className="mb-2 text-sm font-semibold">{t("lessons.editor.outline")}</h2>
+                  {outline.length === 0 ? (
+                    <p className="text-sm text-cova-mute">{t("lessons.editor.outlineEmpty")}</p>
+                  ) : (
+                    <ul className="max-h-[70vh] space-y-1 overflow-y-auto text-sm">
+                      {outline.map((entry) => (
+                        <li key={entry.id}>
+                          <a
+                            href={`#${entry.anchor}`}
+                            onClick={() => setOutlineOpen(false)}
+                            aria-current={activeId === entry.anchor ? "true" : undefined}
+                            className={`block rounded px-2 py-1 hover:bg-cova-bg ${activeId === entry.anchor ? "bg-cova-pale font-semibold" : "text-cova-mute"}`}
+                          >
+                            {entry.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardBody>
+              </Card>
+            </nav>
           </aside>
         </div>
       ) : (
         <Card>
           <CardBody>
             {lesson.content && <p className="whitespace-pre-wrap text-sm leading-7">{lesson.content}</p>}
-            {lesson.content && !lesson.content_blocks?.length && <p className="mt-1 text-xs text-cova-mute">{t("lessons.view.materialsHint")}</p>}
+            {lesson.content && <p className="mt-1 text-xs text-cova-mute">{t("lessons.view.materialsHint")}</p>}
           </CardBody>
         </Card>
       )}
