@@ -9,7 +9,7 @@ export const THEME_STORAGE_KEY = "cova-theme";
 const CHANGE_EVENT = "cova-theme-change";
 
 /** The theme currently applied to <html> (set before paint by the head script). */
-function getAppliedTheme(): Theme {
+export function getAppliedTheme(): Theme {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
 
@@ -23,6 +23,33 @@ export function applyTheme(theme: Theme): void {
     // Private mode: the choice just won't survive the next visit.
   }
   window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+/* ---------------------------------------------------------------- text size */
+
+export type TextSize = "small" | "medium" | "large";
+
+export const TEXT_SIZE_STORAGE_KEY = "cova-text-size";
+
+/** Applies the choice globally: rem-based utilities scale with the root size. */
+export function applyTextSize(size: TextSize): void {
+  if (size === "medium") delete document.documentElement.dataset.textSize;
+  else document.documentElement.dataset.textSize = size;
+  try {
+    localStorage.setItem(TEXT_SIZE_STORAGE_KEY, size);
+  } catch {
+    // Private mode: the choice just won't survive the next visit.
+  }
+}
+
+export function getStoredTextSize(): TextSize {
+  try {
+    const stored = localStorage.getItem(TEXT_SIZE_STORAGE_KEY);
+    if (stored === "small" || stored === "large") return stored;
+  } catch {
+    // Ignore.
+  }
+  return "medium";
 }
 
 function subscribe(onChange: () => void): () => void {

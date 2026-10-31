@@ -24,6 +24,16 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Text size preference (Settings): every rem-based utility scales with it,
+   so spacing and type grow together and the responsive layout holds. */
+html[data-text-size="small"] {
+  font-size: 14px;
+}
+
+html[data-text-size="large"] {
+  font-size: 18px;
+}
+
 body {
   min-height: 100vh;
   font-family: var(--font-sans);

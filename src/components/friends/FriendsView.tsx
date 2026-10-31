@@ -27,10 +27,11 @@ import type { SocialUser } from "@/types/social";
 import { getSupabase } from "@/lib/supabase/client";
 import { useHydrated } from "@/lib/use-hydrated";
 
-/** Extra profile bits (photo, title) fetched directly; stay empty before the migration runs. */
+/** Extra profile bits (photo, title, presence) via the visibility-aware RPC. */
 interface PersonExtras {
   headline: string;
   avatarUrl: string | null;
+  online: boolean;
 }
 
 export function FriendsView() {
@@ -69,27 +70,53 @@ export function FriendsView() {
     if (!meId || !codesKey) return;
     let active = true;
     void (async () => {
+      const codes = codesKey.split(",");
       try {
+        // Server-enforced privacy: each person decides who sees their details.
         const { data, error } = await getSupabase()
-          .from("profiles")
-          .select("user_code,display_name,headline,avatar_url")
-          .in("user_code", codesKey.split(","));
+          .rpc("get_visible_profiles", { p_codes: codes });
         if (error) throw error;
         if (!active) return;
         const map: Record<string, PersonExtras> = {};
         for (const row of (data ?? []) as Array<{
           user_code: string | null;
-          display_name: string | null;
           headline: string | null;
           avatar_url: string | null;
+          online: boolean | null;
         }>) {
           if (row.user_code) {
-            map[row.user_code] = { headline: row.headline ?? "", avatarUrl: row.avatar_url };
+            map[row.user_code] = {
+              headline: row.headline ?? "",
+              avatarUrl: row.avatar_url,
+              online: row.online === true,
+            };
           }
         }
         setExtras(map);
       } catch {
-        // Photos and titles stay empty when the profile migration hasn't run yet.
+        // Fallback before the settings migration runs (no privacy filtering).
+        try {
+          const { data, error } = await getSupabase()
+            .from("profiles")
+            .select("user_code,display_name,headline,avatar_url")
+            .in("user_code", codes);
+          if (error) throw error;
+          if (!active) return;
+          const map: Record<string, PersonExtras> = {};
+          for (const row of (data ?? []) as Array<{
+            user_code: string | null;
+            display_name: string | null;
+            headline: string | null;
+            avatar_url: string | null;
+          }>) {
+            if (row.user_code) {
+              map[row.user_code] = { headline: row.headline ?? "", avatarUrl: row.avatar_url, online: false };
+            }
+          }
+          setExtras(map);
+        } catch {
+          // Photos and titles stay empty when neither path is available.
+        }
       }
     })();
     return () => {
@@ -142,7 +169,15 @@ export function FriendsView() {
     const extra = extras[user.id];
     return (
       <li className="flex items-center gap-4 p-4">
-        <Avatar name={user.displayName} src={extra?.avatarUrl} tone={user.tone} size="md" />
+        <span className="relative">
+          <Avatar name={user.displayName} src={extra?.avatarUrl} tone={user.tone} size="md" />
+          {extra?.online && (
+            <span
+              title={t("friends.online")}
+              className="absolute bottom-0 end-0 h-3 w-3 rounded-full border-2 border-white bg-green-500"
+            />
+          )}
+        </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{user.displayName}</p>
           <p className="truncate text-xs text-cova-mute">{extra?.headline || user.id}</p>

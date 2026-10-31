@@ -17,8 +17,8 @@ export const viewport: Viewport = {
 };
 
 // Runs before first paint: applies the saved theme (or the system preference)
-// so the page never flashes in the wrong theme during hydration.
-const themeInitScript = `try{var t=localStorage.getItem("cova-theme");if(t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches)){var r=document.documentElement;r.classList.add("dark");r.style.colorScheme="dark"}}catch(e){}`;
+// and the text size so the page never flashes in the wrong look during hydration.
+const themeInitScript = `try{var t=localStorage.getItem("cova-theme");if(t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches)){var r=document.documentElement;r.classList.add("dark");r.style.colorScheme="dark"}var s=localStorage.getItem("cova-text-size");if(s==="small"||s==="large"){document.documentElement.dataset.textSize=s}}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();

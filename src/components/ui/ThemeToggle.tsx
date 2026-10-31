@@ -1,13 +1,13 @@
 "use client";
 
 import { useT } from "@/i18n/client";
-import { useTheme } from "@/lib/theme";
+import { useUserSettings } from "@/lib/user-settings";
 
 /** Light/dark switch (the dark mode setting): sun and moon on a sliding knob. */
 export function ThemeToggle() {
-  const { theme, toggle } = useTheme();
+  const { settings, update } = useUserSettings();
   const t = useT();
-  const dark = theme === "dark";
+  const dark = settings.theme === "dark";
 
   return (
     <button
@@ -15,8 +15,8 @@ export function ThemeToggle() {
       role="switch"
       aria-checked={dark}
       aria-label={dark ? t("settings.lightMode") : t("settings.darkMode")}
-      data-theme={theme}
-      onClick={toggle}
+      data-theme={settings.theme}
+      onClick={() => update({ theme: dark ? "light" : "dark" }, () => t("settings.saveError"))}
       className="theme-toggle"
     >
       <span className="theme-toggle__knob">
