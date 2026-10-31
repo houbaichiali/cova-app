@@ -2,16 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowUp, FileUp, Gamepad2, Plus, Trash2 } from "lucide-react";
+import { ArrowUp, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
-import { Modal } from "@/components/ui/Modal";
-import { TextAreaField, TextField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
+import { LessonCreateModal } from "@/components/learning/LessonCreateModal";
 
 interface LessonRow {
   id: string;
@@ -38,17 +36,10 @@ interface ActivityRow {
 export function ModuleWorkspace({ courseId }: { courseId: string }) {
   const t = useT();
   const toast = useToast();
-  const router = useRouter();
   const [lessons, setLessons] = useState<LessonRow[] | null>(null);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [isOwner, setIsOwner] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [externalForm, setExternalForm] = useState(false);
-  const [title, setTitle] = useState("");
-  const [summary, setSummary] = useState("");
-  const [objectives, setObjectives] = useState("");
-  const [duration, setDuration] = useState("");
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,53 +64,6 @@ export function ModuleWorkspace({ courseId }: { courseId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional data fetch on mount into component state
     void load();
   }, [load]);
-
-  async function createLesson(lessonType: "external" | "native") {
-    if (title.trim().length < 2) {
-      toast.push(t("lessons.create.titleMin"));
-      return;
-    }
-    setSaving(true);
-    try {
-      const supabase = getSupabase();
-      const position = (lessons?.length ?? 0) + 1;
-      
-      const { data, error } = await supabase
-        .from("lessons")
-        .insert({
-          course_id: courseId,
-          title: title.trim(),
-          summary: summary.trim(),
-          content: lessonType === "external" ? summary.trim() : "",
-          lesson_type: lessonType,
-          position,
-          lesson_status: "draft",
-          content_blocks: [],
-          objectives: objectives.trim(),
-          duration_minutes: duration ? Number(duration) : null,
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
-      toast.push(t("lessons.create.success"));
-      setAddOpen(false);
-      setExternalForm(false);
-      setTitle("");
-      setSummary("");
-      setObjectives("");
-      setDuration("");
-      if (lessonType === "native" && data) {
-        router.push(`/courses/${courseId}/lessons/${(data as { id: string }).id}/edit`);
-      } else {
-        await load();
-      }
-    } catch (error) {
-      console.error("Unable to create the lesson:", error);
-      toast.push((error as Error).message || t("lessons.create.error"));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function move(lesson: LessonRow, direction: -1 | 1) {
     if (!lessons) return;
@@ -238,34 +182,13 @@ export function ModuleWorkspace({ courseId }: { courseId: string }) {
         </div>
       </CardBody>
 
-      <Modal open={addOpen} onClose={() => !saving && setAddOpen(false)} title={t("lessons.create.title")} description={t("lessons.create.chooseDescription")}>
-        {!externalForm ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <button type="button" onClick={() => setExternalForm(true)} className="flex flex-col items-start gap-3 rounded-xl border-2 border-cova-line p-5 text-start transition-colors hover:border-cova-muted hover:bg-cova-pale/40">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cova-pale"><FileUp className="h-5 w-5 text-cova-muted" aria-hidden="true" /></span>
-              <span className="font-semibold">{t("lessons.create.externalTitle")}</span>
-              <span className="text-sm text-cova-mute">{t("lessons.create.externalDescription")}</span>
-            </button>
-            <button type="button" onClick={() => void createLesson("native")} className="flex flex-col items-start gap-3 rounded-xl border-2 border-cova-line p-5 text-start transition-colors hover:border-cova-muted hover:bg-cova-pale/40">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-cova-pale"><Gamepad2 className="h-5 w-5 text-cova-muted" aria-hidden="true" /></span>
-              <span className="font-semibold">{t("lessons.create.nativeTitle")}</span>
-              <span className="text-sm text-cova-mute">{t("lessons.create.nativeDescription")}</span>
-            </button>
-          </div>
-        ) : (
-          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void createLesson("external"); }}>
-            <TextField id="lesson-ext-title" label={t("lessons.editor.lessonTitle")} value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} />
-            <TextAreaField id="lesson-ext-summary" label={t("modules.create.summary")} value={summary} onChange={(event) => setSummary(event.target.value)} maxLength={500} />
-            <TextAreaField id="lesson-ext-objectives" label={t("modules.create.objectives")} value={objectives} onChange={(event) => setObjectives(event.target.value)} maxLength={2000} />
-            <TextField id="lesson-ext-duration" type="number" label={t("assignments.create.estimatedDuration")} value={duration} onChange={(event) => setDuration(event.target.value)} min={1} />
-            <p className="text-xs text-cova-mute">{t("lessons.create.filesHint")}</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setExternalForm(false)}>{t("assignments.create.back")}</Button>
-              <Button type="submit" disabled={saving}>{saving ? t("settings.saving") : t("lessons.create.create")}</Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      <LessonCreateModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        modules={[]}
+        courseId={courseId}
+        onCreated={() => void load()}
+      />
     </Card>
   );
 }
