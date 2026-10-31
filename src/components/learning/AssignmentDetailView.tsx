@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowLeft, CalendarDays, Code2, Play, Send } from "lucide-react";
 import { DownloadButton } from "@/components/ui/DownloadButton";
+import { AssignmentRunner } from "@/components/learning/AssignmentRunner";
+import { AttemptGrading } from "@/components/learning/AttemptGrading";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -41,6 +43,15 @@ type AssignmentRecord = {
   kind: "general" | "coding";
   exercise_type: ChallengeType | "mixed";
   questions: Array<{ prompt: string; choices?: string[]; type?: ChallengeType }>;
+  mode: "external" | "interactive";
+  status: "draft" | "published";
+  summary: string;
+  submission_instructions: string;
+  time_limit_minutes: number | null;
+  attempts_allowed: number;
+  randomize_questions: boolean;
+  show_results_immediately: boolean;
+  allow_review: boolean;
 };
 type Submission = {
   id: string;
@@ -124,19 +135,23 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
 
       const { data: row, error: assignmentError } = await supabase
         .from("assignments")
-        .select("id,course_id,created_by,title,description,due_at,created_at,points,attachment_path,attachment_name,kind,exercise_type,questions")
+        .select("id,course_id,created_by,title,description,due_at,created_at,points,attachment_path,attachment_name,kind,exercise_type,questions,mode,status,summary,submission_instructions,time_limit_minutes,attempts_allowed,randomize_questions,show_results_immediately,allow_review")
         .eq("id", assignmentId)
         .maybeSingle();
       if (assignmentError) throw assignmentError;
       if (!row) throw new Error("Assignment not found");
       const currentAssignment = row as AssignmentRecord;
       setAssignment(currentAssignment);
+      const owner = uid === currentAssignment.created_by;
+      if (currentAssignment.status === "draft" && !owner) {
+        setNotFound(true);
+        return;
+      }
       if (currentAssignment.attachment_path) {
         const { data: signed } = await supabase.storage.from(ATTACHMENT_BUCKET)
           .createSignedUrl(currentAssignment.attachment_path, 600, { download: currentAssignment.attachment_name ?? true });
         setAttachmentUrl(signed?.signedUrl ?? null);
       } else setAttachmentUrl(null);
-      const owner = uid === currentAssignment.created_by;
       setIsOwner(owner);
 
       const { data: course } = await supabase.from("courses").select("title").eq("id", currentAssignment.course_id).maybeSingle();
@@ -274,8 +289,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
     }
   }
 
-  async function saveGrade(event: FormEvent<HTMLFormElement>, participant: Participant) {
-    event.preventDefault();
+  async function saveGrade(event: FormEvent<HTMLFormElement>, participant: Participant) {    event.preventDefault();
     if (!participant.submission_id || !assignment) return;
     const gradeText = grades[participant.submission_id] ?? "";
     const grade = Number(gradeText);
@@ -298,6 +312,19 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
     }
   }
 
+  async function publishDraft() {
+    if (!assignment) return;
+    try {
+      const { error } = await getSupabase().from("assignments").update({ status: "published" }).eq("id", assignment.id);
+      if (error) throw error;
+      toast.push(t("assignments.detail.published"));
+      await load();
+    } catch (error) {
+      console.error("Unable to publish the assignment:", error);
+      toast.push(t("assignments.createError"));
+    }
+  }
+
   return (
     <div className="space-y-5">
       <Link href="/assignments" className="inline-flex items-center gap-2 text-sm font-medium text-cova-mute hover:text-cova-ink"><ArrowLeft className="h-4 w-4" aria-hidden="true" />{t("assignments.detail.back")}</Link>
@@ -311,6 +338,8 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
                 <Badge tone="outline">{courseTitle}</Badge>
                 <Badge tone={deadlineOpen ? "soft" : "pale"}>{deadlineOpen ? t("assignments.deadlineOpen") : t("assignments.deadlinePassed")}</Badge>
                 <Badge tone="outline">{t(`challenges.type.${assignment.exercise_type}` as never)}</Badge>
+                {assignment.status === "draft" && <Badge tone="pale">{t("assignments.detail.draft")}</Badge>}
+                {assignment.mode === "interactive" && <Badge tone="soft">{t("assignments.runner.interactive")}</Badge>}
               </div>
               <h1 className="mt-3 text-2xl font-semibold">{assignment.title}</h1>
               <p className="mt-3 flex flex-wrap items-center gap-3 text-sm text-cova-mute">
@@ -318,7 +347,8 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
                 <span>{t("assignments.points", { points: assignment.points })}</span>
               </p>
             </div>
-            {!isOwner && !submission && submissionWindowOpen && <Button disabled={starting || !userId} onClick={() => void startAssignment()}><Play className="h-4 w-4" aria-hidden="true" />{starting ? t("assignments.detail.starting") : t("assignments.detail.start")}</Button>}
+            {!isOwner && assignment.mode !== "interactive" && !submission && submissionWindowOpen && <Button disabled={starting || !userId} onClick={() => void startAssignment()}><Play className="h-4 w-4" aria-hidden="true" />{starting ? t("assignments.detail.starting") : t("assignments.detail.start")}</Button>}
+            {isOwner && assignment.status === "draft" && <Button onClick={() => void publishDraft()}>{t("assignments.detail.publish")}</Button>}
             {!isOwner && assignment.kind === "coding" && <Link href={`/coding?assignmentId=${encodeURIComponent(assignment.id)}&assignmentTitle=${encodeURIComponent(assignment.title)}`} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-cova-line bg-white px-3 text-sm font-medium hover:bg-cova-pale"><Code2 className="h-4 w-4" aria-hidden="true" />{t("assignments.detail.openCodingLab")}</Link>}
             {!isOwner && submission?.status === "in_progress" && <Badge tone="soft">{t("assignments.status.in-progress")}</Badge>}
           </CardBody></Card>
@@ -330,8 +360,29 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
             {attachmentUrl && <div className="mt-4"><DownloadButton url={attachmentUrl} label={assignment.attachment_name || t("assignments.detail.attachmentOpen")} openLabel={t("dlb.open")} /></div>}
           </CardBody></Card>
 
-          {!isOwner && !submission && <p className="text-sm text-cova-mute">{submissionWindowOpen ? deadlineOpen ? t("assignments.detail.startsAt") : t("assignments.detail.lateWindow") : t("assignments.detail.deadlineClosed")}</p>}
-          {!isOwner && submission?.status === "in_progress" && (
+          {!isOwner && assignment.mode === "interactive" && assignment && (
+            <AssignmentRunner
+              assignment={{
+                id: assignment.id,
+                title: assignment.title,
+                description: assignment.description,
+                points: assignment.points,
+                due_at: assignment.due_at,
+                exercise_type: assignment.exercise_type,
+                questions: assignment.questions,
+                submission_instructions: assignment.submission_instructions,
+                time_limit_minutes: assignment.time_limit_minutes,
+                attempts_allowed: assignment.attempts_allowed,
+                randomize_questions: assignment.randomize_questions,
+                show_results_immediately: assignment.show_results_immediately,
+                allow_review: assignment.allow_review,
+              }}
+              onDone={() => void load()}
+            />
+          )}
+
+          {!isOwner && assignment.mode !== "interactive" && !submission && <p className="text-sm text-cova-mute">{submissionWindowOpen ? deadlineOpen ? t("assignments.detail.startsAt") : t("assignments.detail.lateWindow") : t("assignments.detail.deadlineClosed")}</p>}
+          {!isOwner && assignment.mode !== "interactive" && submission?.status === "in_progress" && (
             <Card><CardBody>
               <h2 className="text-lg font-semibold">{t("assignments.detail.submitTitle")}</h2>
               <p className="mt-1 text-sm text-cova-mute">{t("assignments.detail.submitHint")}</p>
@@ -359,7 +410,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
             </CardBody></Card>
           )}
 
-          {!isOwner && submission && submission.status !== "in_progress" && (
+          {!isOwner && assignment.mode !== "interactive" && submission && submission.status !== "in_progress" && (
             <Card><CardBody className="space-y-4">
               <Badge tone="soft">{t(STATUS_LABELS[submission.grade !== null || submission.status === "graded" ? "graded" : "submitted"])}</Badge>
               <p className="text-sm text-cova-mute">{t("assignments.detail.submittedAt", { date: submission.submitted_at ? new Date(submission.submitted_at).toLocaleString(formatTag) : "" })}</p>
@@ -367,6 +418,10 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
               {studentFileUrl && <DownloadButton url={studentFileUrl} label={t("assignments.detail.fileOpen")} openLabel={t("dlb.open")} />}
               {submission.grade !== null && <div className="rounded-xl border border-cova-line p-4"><h2 className="font-semibold">{t("assignments.detail.grade")}</h2><p className="mt-1 text-2xl font-semibold">{submission.grade} / {assignment.points}</p><h3 className="mt-4 text-sm font-semibold">{t("assignments.detail.feedback")}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-cova-mute">{submission.feedback || t("assignments.detail.noFeedback")}</p></div>}
             </CardBody></Card>
+          )}
+
+          {isOwner && assignment.mode === "interactive" && assignment && (
+            <AttemptGrading assignmentId={assignment.id} questions={assignment.questions} points={assignment.points} onGraded={() => void load()} />
           )}
 
           {isOwner && <Card><CardBody>
