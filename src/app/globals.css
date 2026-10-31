@@ -46,3 +46,209 @@ body {
 dialog::backdrop {
   background: rgb(36 52 71 / 0.35);
 }
+
+/* ---------------------------------------------------------------- dark theme */
+/* The utilities (bg-white, text-cova-ink, border-cova-line, …) read the theme
+   variables, so overriding them under html.dark re-themes the whole app. */
+html.dark {
+  color-scheme: dark;
+  --color-cova-pale: #16283c;
+  --color-cova-soft: #2f5d7c;
+  --color-cova-muted: #6f9fba;
+  --color-cova-bg: #0b1220;
+  --color-cova-ink: #e7eef6;
+  --color-cova-mute: #94a8bc;
+  --color-cova-line: #223247;
+  --color-white: #101b2d;
+}
+
+/* --------------------------------------------------------------- theme toggle */
+/* Pill switch with a sliding knob: sun visible in light mode, moon in dark. */
+.theme-toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 32px;
+  border: 2px solid var(--color-cova-line);
+  border-radius: 999px;
+  background: var(--color-cova-bg);
+  cursor: pointer;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.theme-toggle__knob {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-cova-soft);
+  color: var(--color-cova-ink);
+  transform: translateY(-50%);
+  transition: left 0.3s ease, background 0.3s ease;
+}
+
+.theme-toggle[data-theme="dark"] .theme-toggle__knob {
+  left: 33px;
+}
+
+.theme-toggle__sun,
+.theme-toggle__moon {
+  position: absolute;
+  transition: opacity 0.2s ease;
+}
+
+.theme-toggle__moon {
+  opacity: 0;
+}
+
+.theme-toggle[data-theme="dark"] .theme-toggle__moon {
+  opacity: 1;
+}
+
+.theme-toggle[data-theme="dark"] .theme-toggle__sun {
+  opacity: 0;
+}
+
+/* ------------------------------------------------------- animated download pill */
+/* Adapted from Uiverse.io by nazar-gavrylyk. Phases (set by DownloadButton):
+   idle = "Download", busy = installing animation, done = green "Open". */
+.dlb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 148px;
+  padding: 4px;
+  border: 2px solid var(--color-cova-muted);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  transition: width 0.4s ease, border-color 0.4s ease, opacity 0.3s ease;
+}
+
+.dlb:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.dlb__circle {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 32px;
+  width: 32px;
+  border-radius: 50%;
+  background: var(--color-cova-muted);
+  color: #fff;
+  overflow: hidden;
+  transition: rotate 0.4s ease, opacity 0.3s ease, transform 0.3s ease;
+}
+
+.dlb__circle::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 0;
+  background: #33627a;
+  transition: height 0.3s ease;
+}
+
+.dlb__icon {
+  position: absolute;
+  width: 18px;
+  transition: opacity 0.2s ease;
+}
+
+.dlb__square {
+  position: absolute;
+  width: 12px;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: #fff;
+  opacity: 0;
+  transition: opacity 0.3s ease 0.3s;
+}
+
+.dlb__title {
+  position: absolute;
+  inset-inline-end: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-cova-mute);
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+
+.dlb.busy {
+  width: 44px;
+}
+
+.dlb.busy .dlb__circle {
+  rotate: 180deg;
+  animation: dlb-pulse 1s ease forwards;
+}
+
+.dlb.busy .dlb__circle::before {
+  animation: dlb-filling 3s ease-in-out forwards;
+}
+
+.dlb.busy .dlb__icon {
+  opacity: 0;
+}
+
+.dlb.busy .dlb__square {
+  opacity: 1;
+}
+
+.dlb.busy .dlb__title {
+  opacity: 0;
+}
+
+.dlb.done {
+  width: 96px;
+  border-color: #2fae43;
+}
+
+.dlb.done .dlb__circle {
+  opacity: 0;
+  transform: scale(0);
+}
+
+.dlb.done .dlb__title {
+  inset-inline: 0;
+  text-align: center;
+  color: #2fae43;
+  font-weight: 600;
+}
+
+@keyframes dlb-pulse {
+  0% {
+    scale: 0.95;
+    box-shadow: 0 0 0 0 rgb(111 159 186 / 0.55);
+  }
+  70% {
+    scale: 1;
+    box-shadow: 0 0 0 14px rgb(111 159 186 / 0);
+  }
+  100% {
+    scale: 0.95;
+    box-shadow: 0 0 0 0 rgb(111 159 186 / 0);
+  }
+}
+
+@keyframes dlb-filling {
+  from {
+    height: 0;
+  }
+  to {
+    height: 100%;
+  }
+}

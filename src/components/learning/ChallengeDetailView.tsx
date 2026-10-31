@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Play, Send } from "lucide-react";
+import { ArrowLeft, Play, Send } from "lucide-react";
+import { DownloadButton } from "@/components/ui/DownloadButton";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -174,7 +175,7 @@ export function ChallengeDetailView({ challengeId }: { challengeId: string }) {
       {submission?.status === "in_progress" && !owner && <Badge tone="outline">{t("assignments.status.in-progress")}</Badge>}
       {submission?.status === "submitted" && !owner && <Badge tone="soft">{t("assignments.status.submitted")}</Badge>}
     </CardBody></Card>
-    {attachmentUrl && <Card><CardBody><a href={attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline"><Download className="h-4 w-4" aria-hidden="true" />{challenge.attachment_name || t("challenges.detail.attachment")}</a></CardBody></Card>}
+    {attachmentUrl && <Card><CardBody><DownloadButton url={attachmentUrl} label={challenge.attachment_name || t("challenges.detail.attachment")} openLabel={t("dlb.open")} /></CardBody></Card>}
     <Card><CardBody className="space-y-5">
       <h2 className="text-lg font-semibold">{t("challenges.exerciseType")}</h2>
       {challenge.questions.map((question, questionIndex) => <fieldset key={questionIndex} className="space-y-3 rounded-xl border border-cova-line p-4" disabled={owner || submission?.status === "submitted" || !submission}>
@@ -189,6 +190,6 @@ export function ChallengeDetailView({ challengeId }: { challengeId: string }) {
       {!owner && submission?.status === "in_progress" && <form onSubmit={(event) => void submitChallenge(event)}><Button type="submit" disabled={submitting}><Send className="h-4 w-4" aria-hidden="true" />{submitting ? t("challenges.detail.submitting") : t("challenges.detail.submit")}</Button></form>}
       {!owner && submission?.status === "submitted" && <div className="rounded-lg bg-cova-pale p-3 text-sm">{submission.score === null ? t("challenges.detail.manualGrade") : challenge.builtIn ? t("challenges.detail.correct", { count: correctAnswers, total: keyedQuestions.length, score: submission.score, points: challenge.points }) : t("challenges.detail.score", { score: `${submission.score}/${challenge.points}` })}</div>}
     </CardBody></Card>
-    {owner && <Card><CardBody><h2 className="text-lg font-semibold">{t("challenges.detail.responses")}</h2>{responses.length === 0 ? <p className="mt-3 text-sm text-cova-mute">{t("challenges.detail.noResponses")}</p> : <ul className="mt-4 space-y-3">{responses.map((entry) => <li key={entry.id} className="rounded-xl border border-cova-line p-4"><div className="flex flex-wrap justify-between gap-2"><p className="text-sm font-medium">{t("challenges.detail.student")}</p><Badge tone={entry.status === "submitted" ? "soft" : "outline"}>{t(`assignments.status.${entry.status === "submitted" ? "submitted" : "in-progress"}` as never)}</Badge></div>{entry.submitted_at && <p className="mt-1 text-xs text-cova-mute">{new Date(entry.submitted_at).toLocaleString(formatTag)}</p>}{entry.response_text && <p className="mt-3 whitespace-pre-wrap text-sm">{entry.response_text}</p>}{entry.score !== null && <p className="mt-2 text-sm font-semibold">{t("challenges.detail.score", { score: `${entry.score}/${challenge.points}` })}</p>}{entry.file_url && <a href={entry.file_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 text-sm underline"><Download className="h-4 w-4" aria-hidden="true" />{entry.file_name || t("challenges.detail.fileResponse")}</a>}</li>)}</ul>}</CardBody></Card>}
+    {owner && <Card><CardBody><h2 className="text-lg font-semibold">{t("challenges.detail.responses")}</h2>{responses.length === 0 ? <p className="mt-3 text-sm text-cova-mute">{t("challenges.detail.noResponses")}</p> : <ul className="mt-4 space-y-3">{responses.map((entry) => <li key={entry.id} className="rounded-xl border border-cova-line p-4"><div className="flex flex-wrap justify-between gap-2"><p className="text-sm font-medium">{t("challenges.detail.student")}</p><Badge tone={entry.status === "submitted" ? "soft" : "outline"}>{t(`assignments.status.${entry.status === "submitted" ? "submitted" : "in-progress"}` as never)}</Badge></div>{entry.submitted_at && <p className="mt-1 text-xs text-cova-mute">{new Date(entry.submitted_at).toLocaleString(formatTag)}</p>}{entry.response_text && <p className="mt-3 whitespace-pre-wrap text-sm">{entry.response_text}</p>}{entry.score !== null && <p className="mt-2 text-sm font-semibold">{t("challenges.detail.score", { score: `${entry.score}/${challenge.points}` })}</p>}{entry.file_url && <div className="mt-3"><DownloadButton url={entry.file_url} label={entry.file_name || t("challenges.detail.fileResponse")} openLabel={t("dlb.open")} /></div>}</li>)}</ul>}</CardBody></Card>}
   </div>;
 }

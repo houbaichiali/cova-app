@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, ExternalLink, FileText } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
+import { DownloadButton } from "@/components/ui/DownloadButton";
 import { useToast } from "@/components/ui/Toast";
 import { useI18n } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
@@ -36,7 +36,6 @@ export function ResourceDetailView({ resourceId }: { resourceId: string }) {
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -81,25 +80,19 @@ export function ResourceDetailView({ resourceId }: { resourceId: string }) {
     return () => { active = false; };
   }, [resourceId]);
 
-  async function download() {
-    if (!resource || downloading) return;
-    setDownloading(true);
+  /** Fresh signed URL for the download click (forces the file attachment). */
+  async function fetchDownloadUrl(): Promise<string | null> {
+    if (!resource) return null;
     try {
       const { data, error: downloadError } = await getSupabase().storage
         .from(BUCKET)
         .createSignedUrl(resource.storage_path, 60 * 10, { download: resource.file_name });
       if (downloadError) throw downloadError;
-      const link = document.createElement("a");
-      link.href = data.signedUrl;
-      link.download = resource.file_name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      return data.signedUrl;
     } catch (downloadError) {
       console.error("Unable to download resource:", downloadError);
       toast.push(t("resources.fileOpenError"));
-    } finally {
-      setDownloading(false);
+      return null;
     }
   }
 
@@ -125,8 +118,7 @@ export function ResourceDetailView({ resourceId }: { resourceId: string }) {
               <p className="mt-3 text-xs text-cova-mute">{resource.file_name} · {t("resources.readTime", { minutes: resource.minutes.toLocaleString(formatTag) })} · {t("resources.sharedOn", { date: new Date(resource.created_at).toLocaleDateString(formatTag) })}</p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {fileUrl && <a href={fileUrl} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-cova-line bg-white px-4 text-sm font-medium hover:bg-cova-pale"><ExternalLink className="h-4 w-4" aria-hidden="true" />{t("resources.openInNewTab")}</a>}
-              <Button disabled={downloading} onClick={() => void download()}><Download className="h-4 w-4" aria-hidden="true" />{downloading ? t("resources.downloading") : t("resources.download")}</Button>
+              {fileUrl && <DownloadButton getUrl={fetchDownloadUrl} openUrl={fileUrl} label={t("resources.download")} openLabel={t("resources.openInNewTab")} />}
             </div>
           </CardBody></Card>
 

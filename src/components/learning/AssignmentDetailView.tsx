@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, CalendarDays, Code2, Download, FileText, Play, Send } from "lucide-react";
+import { ArrowLeft, CalendarDays, Code2, Play, Send } from "lucide-react";
+import { DownloadButton } from "@/components/ui/DownloadButton";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -326,7 +327,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
             <h2 className="text-lg font-semibold">{t("assignments.detail.instructions")}</h2>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{assignment.description}</p>
             {assignment.questions.filter((question) => !question.choices?.length).map((question, index) => <p key={index} className="mt-3 rounded-lg bg-cova-pale p-3 text-sm font-medium">{question.prompt}</p>)}
-            {attachmentUrl && <a href={attachmentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 rounded-lg border border-cova-line bg-white px-3 py-2 text-sm font-medium hover:bg-cova-pale"><Download className="h-4 w-4" aria-hidden="true" />{assignment.attachment_name || t("assignments.detail.attachmentOpen")}</a>}
+            {attachmentUrl && <div className="mt-4"><DownloadButton url={attachmentUrl} label={assignment.attachment_name || t("assignments.detail.attachmentOpen")} openLabel={t("dlb.open")} /></div>}
           </CardBody></Card>
 
           {!isOwner && !submission && <p className="text-sm text-cova-mute">{submissionWindowOpen ? deadlineOpen ? t("assignments.detail.startsAt") : t("assignments.detail.lateWindow") : t("assignments.detail.deadlineClosed")}</p>}
@@ -363,7 +364,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
               <Badge tone="soft">{t(STATUS_LABELS[submission.grade !== null || submission.status === "graded" ? "graded" : "submitted"])}</Badge>
               <p className="text-sm text-cova-mute">{t("assignments.detail.submittedAt", { date: submission.submitted_at ? new Date(submission.submitted_at).toLocaleString(formatTag) : "" })}</p>
               {submission.submission_text && <div><h2 className="font-semibold">{t("assignments.detail.responseLabel")}</h2><p className="mt-2 whitespace-pre-wrap text-sm">{submission.submission_text}</p></div>}
-              {studentFileUrl && <a href={studentFileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline"><FileText className="h-4 w-4" aria-hidden="true" />{t("assignments.detail.fileOpen")}</a>}
+              {studentFileUrl && <DownloadButton url={studentFileUrl} label={t("assignments.detail.fileOpen")} openLabel={t("dlb.open")} />}
               {submission.grade !== null && <div className="rounded-xl border border-cova-line p-4"><h2 className="font-semibold">{t("assignments.detail.grade")}</h2><p className="mt-1 text-2xl font-semibold">{submission.grade} / {assignment.points}</p><h3 className="mt-4 text-sm font-semibold">{t("assignments.detail.feedback")}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-cova-mute">{submission.feedback || t("assignments.detail.noFeedback")}</p></div>}
             </CardBody></Card>
           )}
@@ -391,7 +392,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
                             : typeof answer === "number" && answer >= 0 ? question.choices?.[answer] ?? "" : typeof answer === "string" ? answer : "";
                           return <div key={questionIndex}><h4 className="text-sm font-medium">{question.prompt}</h4><p className="mt-1 whitespace-pre-wrap rounded-lg bg-cova-pale p-3 text-sm">{rendered || t("assignments.detail.noResponse")}</p></div>;
                         })}
-                        {participant.file_url && <a href={participant.file_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline"><Download className="h-4 w-4" aria-hidden="true" />{participant.storage_path?.split("/").at(-1)}</a>}
+                        {participant.file_url && <DownloadButton url={participant.file_url} label={participant.storage_path?.split("/").at(-1) ?? t("assignments.detail.fileOpen")} openLabel={t("dlb.open")} />}
                         {participant.submission_id && (participant.status === "submitted" || participant.status === "graded") && <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => void saveGrade(event, participant)}>
                           <div><label htmlFor={`grade-${participant.submission_id}`} className="mb-1.5 block text-sm font-medium">{t("assignments.detail.gradeLabel", { points: assignment.points })}</label><input id={`grade-${participant.submission_id}`} type="number" min={0} max={assignment.points} step="0.01" required value={grades[participant.submission_id] ?? ""} onChange={(event) => setGrades((current) => ({ ...current, [participant.submission_id!]: event.target.value }))} className="h-10 w-full rounded-lg border border-cova-line px-3 text-sm" /></div>
                           <div><label htmlFor={`feedback-${participant.submission_id}`} className="mb-1.5 block text-sm font-medium">{t("assignments.detail.feedbackLabel")}</label><input id={`feedback-${participant.submission_id}`} value={feedback[participant.submission_id] ?? ""} onChange={(event) => setFeedback((current) => ({ ...current, [participant.submission_id!]: event.target.value }))} placeholder={t("assignments.detail.feedbackPlaceholder")} className="h-10 w-full rounded-lg border border-cova-line px-3 text-sm" /></div>
