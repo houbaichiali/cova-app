@@ -75,6 +75,76 @@ create trigger user_settings_touch
 before update on public.user_settings
 for each row execute function public.touch_user_settings_updated_at();
 
+--------------------------------------------- private messages (if missing)
+
+-- Some deployed databases were refactored without the social tables: create the
+-- private-message tables when absent so messaging (and its notification
+-- preference) actually works. Existing installations keep their tables.
+create table if not exists public.direct_messages (
+  id         uuid primary key default gen_random_uuid(),
+  from_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  to_id      uuid not null references public.profiles (id) on delete cascade,
+  body       text not null check (char_length(btrim(body)) between 1 and 2000),
+  created_at timestamptz not null default now(),
+  constraint direct_messages_not_self check (from_id <> to_id)
+);
+create index if not exists direct_messages_from_idx on public.direct_messages (from_id, created_at desc);
+create index if not exists direct_messages_to_idx on public.direct_messages (to_id, created_at desc);
+
+alter table public.direct_messages enable row level security;
+grant select, insert on public.direct_messages to authenticated;
+
+do $$
+begin
+  if to_regclass('public.direct_messages') is not null then
+    drop policy if exists "dm_select_participants" on public.direct_messages;
+    create policy dm_select_participants on public.direct_messages
+      for select to authenticated
+      using (from_id = (select auth.uid()) or to_id = (select auth.uid()));
+
+    drop policy if exists "dm_insert_own" on public.direct_messages;
+    create policy dm_insert_own on public.direct_messages
+      for insert to authenticated
+      with check (from_id = (select auth.uid()));
+  end if;
+end $$;
+
+-- When `user_id` last opened the conversation with `other_id`. Written only by
+-- mark_thread_read() so the timestamp comes from the server.
+create table if not exists public.message_reads (
+  user_id  uuid not null references public.profiles (id) on delete cascade,
+  other_id uuid not null references public.profiles (id) on delete cascade,
+  read_at  timestamptz not null default now(),
+  primary key (user_id, other_id)
+);
+
+alter table public.message_reads enable row level security;
+grant select on public.message_reads to authenticated;
+
+do $$
+begin
+  if to_regclass('public.message_reads') is not null then
+    drop policy if exists "message_reads_select" on public.message_reads;
+    create policy message_reads_select on public.message_reads
+      for select to authenticated
+      using (user_id = (select auth.uid()));
+  end if;
+end $$;
+
+create or replace function public.mark_thread_read(p_other uuid)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in first.'; end if;
+  insert into public.message_reads (user_id, other_id, read_at)
+  values (auth.uid(), p_other, clock_timestamp())
+  on conflict (user_id, other_id) do update set read_at = excluded.read_at;
+end;
+$$;
+grant execute on function public.mark_thread_read(uuid) to authenticated;
+
 ------------------------------------------- notifications: respect preferences
 
 -- Whether a notification of this kind may reach this person. A missing row
@@ -154,10 +224,18 @@ begin
 end;
 $$;
 
-drop trigger if exists direct_message_notify on public.direct_messages;
-create trigger direct_message_notify
-after insert on public.direct_messages
-for each row execute function public.notify_on_direct_message_insert();
+-- Every trigger below is created only when its table exists, so the migration
+-- also applies to databases whose schema was refactored (e.g. no direct_messages).
+
+do $$
+begin
+  if to_regclass('public.direct_messages') is not null then
+    drop trigger if exists direct_message_notify on public.direct_messages;
+    create trigger direct_message_notify
+    after insert on public.direct_messages
+    for each row execute function public.notify_on_direct_message_insert();
+  end if;
+end $$;
 
 ------------------------------------------------------ privacy: friend requests
 
@@ -179,10 +257,15 @@ begin
 end;
 $$;
 
-drop trigger if exists friend_requests_allowed on public.friendships;
-create trigger friend_requests_allowed
-before insert on public.friendships
-for each row execute function public.enforce_friend_requests_allowed();
+do $$
+begin
+  if to_regclass('public.friendships') is not null then
+    drop trigger if exists friend_requests_allowed on public.friendships;
+    create trigger friend_requests_allowed
+    before insert on public.friendships
+    for each row execute function public.enforce_friend_requests_allowed();
+  end if;
+end $$;
 
 ------------------------------------------------- privacy: visible profile data
 
