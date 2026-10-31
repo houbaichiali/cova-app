@@ -239,18 +239,39 @@ end $$;
 
 ------------------------------------------------------ privacy: friend requests
 
+-- Schema compatibility: some deployed databases name the pair columns
+-- requester_id/addressee_id instead of from_id/to_id (the schema this app's
+-- data layer reads). Expose generated aliases so both names work everywhere.
+do $$
+begin
+  if to_regclass('public.friendships') is not null
+     and exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'friendships'
+                   and column_name = 'requester_id')
+     and not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'friendships'
+                       and column_name = 'from_id') then
+    execute 'alter table public.friendships add column from_id uuid generated always as (requester_id) stored';
+    execute 'alter table public.friendships add column to_id uuid generated always as (addressee_id) stored';
+  end if;
+end $$;
+
 -- Blocks friend requests towards people who turned them off. A BEFORE trigger
 -- enforces this for every code path (the RPC, direct inserts, imports...).
+-- Column-agnostic: reads whichever pair naming the table uses.
 create or replace function public.enforce_friend_requests_allowed()
 returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
+  payload json := to_json(new);
+  target  uuid := coalesce((payload->>'to_id')::uuid, (payload->>'addressee_id')::uuid);
+  actor   uuid := coalesce((payload->>'from_id')::uuid, (payload->>'requester_id')::uuid);
   allowed boolean;
 begin
   select allow_friend_requests into allowed
   from public.user_settings
-  where user_id = new.to_id;
-  if coalesce(allowed, true) = false and new.from_id is distinct from new.to_id then
+  where user_id = target;
+  if coalesce(allowed, true) = false and actor is distinct from target then
     raise exception 'This person does not accept friend requests.';
   end if;
   return new;
