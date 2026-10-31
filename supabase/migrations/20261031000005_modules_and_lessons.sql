@@ -26,6 +26,21 @@ grant update (summary, cover_path, language, objectives, prerequisites, estimate
 
 ---------------------------------------------------------------- lessons
 
+-- Some deployed databases never had the lessons table: create it when absent
+-- (text id, matching courses.id) so modules actually contain lessons.
+create table if not exists public.lessons (
+  id         text primary key default ('lesson-' || gen_random_uuid()::text),
+  course_id  text not null references public.courses (id) on delete cascade,
+  title      text not null,
+  summary    text not null default '',
+  content    text not null default '',
+  type       text,
+  minutes    integer,
+  created_at timestamptz not null default now()
+);
+
+alter table public.lessons enable row level security;
+
 alter table public.lessons
   add column if not exists lesson_type text not null default 'external'
     check (lesson_type in ('external', 'native')),
@@ -37,6 +52,7 @@ alter table public.lessons
   add column if not exists objectives text not null default '',
   add column if not exists duration_minutes integer;
 
+grant select, insert, update, delete on public.lessons to authenticated;
 grant update (title, summary, content, lesson_type, position, lesson_status,
   content_blocks, objectives, duration_minutes) on public.lessons to authenticated;
 grant insert (course_id, title, summary, content, lesson_type, position, lesson_status,
