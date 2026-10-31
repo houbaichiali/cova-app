@@ -61,11 +61,16 @@ export function AssignmentCreate({
   open,
   onClose,
   courses,
+  initialCourseId = "",
+  initialLessonTitle = "",
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   courses: CourseOption[];
+  /** Deep-link preselection: /assignments?create=1&course=…&lessonTitle=… */
+  initialCourseId?: string;
+  initialLessonTitle?: string;
   onCreated: () => void;
 }) {
   const t = useT();
@@ -81,8 +86,8 @@ export function AssignmentCreate({
   const [category, setCategory] = useState("");
   const [subject, setSubject] = useState("");
   const [level, setLevel] = useState("");
-  const [courseId, setCourseId] = useState("");
-  const [lessonTitle, setLessonTitle] = useState("");
+  const [courseId, setCourseId] = useState(initialCourseId);
+  const [lessonTitle, setLessonTitle] = useState(initialLessonTitle);
   const [sectionTitle, setSectionTitle] = useState("");
   const [difficulty, setDifficulty] = useState("");
   const [estimatedMinutes, setEstimatedMinutes] = useState("");

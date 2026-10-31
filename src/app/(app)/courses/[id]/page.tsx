@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { BookOpen, SearchX } from "lucide-react";
 import { CourseDetail } from "@/components/learning/CourseDetail";
+import { ModuleWorkspace } from "@/components/learning/ModuleWorkspace";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getSupabase } from "@/lib/supabase/client";
@@ -159,5 +160,12 @@ export default function CoursePage() {
     );
   }
 
-  return <CourseDetail course={course} />;
+  return (
+    <>
+      <CourseDetail course={course} />
+      <div className="mt-6">
+        <ModuleWorkspace courseId={course.id} />
+      </div>
+    </>
+  );
 }

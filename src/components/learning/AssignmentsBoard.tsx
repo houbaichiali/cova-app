@@ -44,6 +44,7 @@ export function AssignmentsBoard() {
   const [tab, setTab] = useState<AssignmentTab>("All");
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [prefill, setPrefill] = useState<{ courseId: string; lessonTitle: string }>({ courseId: "", lessonTitle: "" });
   const [courses, setCourses] = useState<CourseRow[]>([]);
 
   const loadAssignments = useCallback(async () => {
@@ -101,11 +102,21 @@ export function AssignmentsBoard() {
     }
   }, []);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional data fetch on mount into component state
-  useEffect(() => { void loadAssignments(); }, [loadAssignments]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional data fetch on mount into component state
+    void loadAssignments();
+  }, [loadAssignments]);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("create") === "1") void openCreateForm();
+    const id = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("create") === "1") {
+        setPrefill({ courseId: params.get("course") ?? "", lessonTitle: params.get("lessonTitle") ?? "" });
+        void openCreateForm();
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read the deep link once on mount
   }, []);
 
   async function openCreateForm() {
@@ -204,7 +215,14 @@ export function AssignmentsBoard() {
         </ul>
       )}
 
-      <AssignmentCreate open={createOpen} onClose={() => setCreateOpen(false)} courses={courses} onCreated={() => void loadAssignments()} />
+      <AssignmentCreate
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        courses={courses}
+        initialCourseId={prefill.courseId}
+        initialLessonTitle={prefill.lessonTitle}
+        onCreated={() => void loadAssignments()}
+      />
     </>
   );
 }
