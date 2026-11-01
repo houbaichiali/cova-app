@@ -130,7 +130,7 @@ begin
   runs as (
     select count(*) as length, max(day) as last_day
     from d
-    group by ((day - rn)::int)
+    group by (day - rn::int)
   )
   select coalesce(max(length), 0) into streak
   from runs
@@ -183,7 +183,7 @@ begin
       runs as (
         select count(*) as length, max(day) as last_day
         from d
-        group by ((day - rn)::int)
+        group by (day - rn::int)
       )
       select coalesce(max(length), 0) into result
       from runs
