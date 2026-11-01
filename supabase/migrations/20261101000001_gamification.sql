@@ -173,15 +173,21 @@ begin
       )
       select count(*) into result from my_courses where done >= total and total > 0;
     when 'streak' then
-      with recursive days as (
-        select (now() at time zone 'utc')::date as day
-        union all
-        select day - 1 from days
-        where exists (select 1 from public.learning_days d where d.user_id = p_user and d.day = (select day from days) - 1)
-          and day > (now() at time zone 'utc')::date - 400
+      -- Consecutive-day runs: equal (day - row_number) marks one run; the
+      -- current streak is the run ending today or yesterday.
+      with d as (
+        select day, row_number() over (order by day) as rn
+        from public.learning_days
+        where user_id = p_user
+      ),
+      runs as (
+        select count(*) as length, max(day) as last_day
+        from d
+        group by (day - rn)
       )
-      select count(*) into result from days
-      where exists (select 1 from public.learning_days d where d.user_id = p_user and d.day = days.day);
+      select coalesce(max(length), 0) into result
+      from runs
+      where last_day >= (now() at time zone 'utc')::date - 1;
     when 'friends' then
       select count(*) into result from public.friendships
       where status = 'accepted' and (from_id = p_user or to_id = p_user);
