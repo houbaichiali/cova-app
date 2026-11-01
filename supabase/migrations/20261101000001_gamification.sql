@@ -661,15 +661,6 @@ language plpgsql security definer set search_path = public as $$
 declare
   allowed boolean;
 begin
-  if p_
-
--- The new notification kinds respect the Challenges/XP preference.
-create or replace function public.notifications_enabled_for(p_user uuid, p_kind text)
-returns boolean
-language plpgsql security definer set search_path = public as $$
-declare
-  allowed boolean;
-begin
   if p_user is null then return false; end if;
   select case p_kind
     when 'new_message' then notify_messages
