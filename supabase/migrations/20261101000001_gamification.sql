@@ -120,15 +120,21 @@ begin
   insert into public.learning_days (user_id, day) values (p_user, (now() at time zone 'utc')::date)
   on conflict (user_id, day) do nothing;
 
-  with recursive days as (
-    select (now() at time zone 'utc')::date as day
-    union all
-    select day - 1 from days
-    where exists (select 1 from public.learning_days d where d.user_id = p_user and d.day = (select day from days) - 1)
-      and day > (now() at time zone 'utc')::date - 400
+  -- Consecutive-day runs: equal (day - row_number) marks one run; the current
+  -- streak is the run ending today or yesterday.
+  with d as (
+    select day, row_number() over (order by day) as rn
+    from public.learning_days
+    where user_id = p_user
+  ),
+  runs as (
+    select count(*) as length, max(day) as last_day
+    from d
+    group by (day - rn)
   )
-  select count(*) into streak from days
-  where exists (select 1 from public.learning_days d where d.user_id = p_user and d.day = days.day);
+  select coalesce(max(length), 0) into streak
+  from runs
+  where last_day >= (now() at time zone 'utc')::date - 1;
   return coalesce(streak, 0);
 end;
 $$;
