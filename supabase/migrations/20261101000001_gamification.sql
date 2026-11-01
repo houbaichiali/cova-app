@@ -29,6 +29,7 @@ create index if not exists badge_definitions_base_idx on public.badge_definition
 
 alter table public.badge_definitions enable row level security;
 grant select on public.badge_definitions to authenticated;
+drop policy if exists "Authenticated read badge definitions" on public.badge_definitions;
 create policy "Authenticated read badge definitions"
   on public.badge_definitions for select to authenticated using (true);
 
