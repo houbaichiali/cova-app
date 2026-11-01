@@ -468,8 +468,7 @@ declare
 begin
   for p in
     select id, created_at from public.profiles
-    where is_sample is not true
-      and (
+    where (
         (date_part('month', created_at at time zone 'utc'), date_part('day', created_at at time zone 'utc'))
         = (date_part('month', now() at time zone 'utc'), date_part('day', now() at time zone 'utc'))
       )
@@ -649,7 +648,7 @@ do $$
 declare
   u record;
 begin
-  for u in select id from public.profiles where is_sample is not true loop
+  for u in select id from public.profiles loop
     perform public.evaluate_badges(u.id);
   end loop;
 end $$;
