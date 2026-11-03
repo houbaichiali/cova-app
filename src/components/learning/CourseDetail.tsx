@@ -11,6 +11,8 @@ import {
   Code2,
   Copy,
   PlayCircle,
+  Plus,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -29,6 +31,8 @@ const lessonIcon = {
   reading: BookText,
   exercise: Code2,
 } satisfies Record<LessonType, typeof PlayCircle>;
+
+type ContentKind = "lesson" | "exercise";
 
 type TpSubmission = {
   id: string;
@@ -63,6 +67,9 @@ const SUPPORTED_UPLOAD_TYPES = new Set([
   "image/jpeg",
 ]);
 
+function localDateTimeValue(date: Date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString();
@@ -81,6 +88,7 @@ export function CourseDetail({ course }: { course: Course }) {
   const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>(course.lessons);
   const [loading, setLoading] = useState(true);
+  const [now] = useState(() => Date.now());
   const [savingEnrollment, setSavingEnrollment] = useState(false);
   const [savingLesson, setSavingLesson] = useState<string | null>(null);
 
@@ -811,7 +819,7 @@ export function CourseDetail({ course }: { course: Course }) {
         </CardBody>
       </Card>
 
-      <CourseResources courseId={course.id} isOwner={isOwner} />
+      <CourseResources key={resourceRefreshKey} courseId={course.id} isOwner={isOwner} />
 
       {isOwner && (
         <Card className="mt-6">
