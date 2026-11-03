@@ -298,3 +298,47 @@ html.dark {
     height: 100%;
   }
 }
+
+/* ------------------------------------------------------------------ COVA QUIZ */
+/* Entrance animations for the game screens. They use plain transforms so the
+   global prefers-reduced-motion rule above flattens them automatically. */
+@keyframes quiz-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes quiz-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  70% {
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.quiz-rise {
+  animation: quiz-rise 0.45s ease both;
+}
+
+.quiz-pop {
+  animation: quiz-pop 0.4s ease both;
+}
+
+.quiz-delay-1 {
+  animation-delay: 0.12s;
+}
+
+.quiz-delay-2 {
+  animation-delay: 0.24s;
+}

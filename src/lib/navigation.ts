@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Code2,
   FolderOpen,
+  Gamepad2,
   Heart,
   LayoutDashboard,
   MessageSquare,
@@ -43,6 +44,7 @@ export const navSections: NavSection[] = [
       { href: "/coding", labelKey: "nav.coding", icon: Code2 },
       { href: "/challenges", labelKey: "nav.challenges", icon: Award },
       { href: "/resources", labelKey: "nav.resources", icon: FolderOpen },
+      { href: "/quiz", label: { en: "COVA QUIZ", fr: "COVA QUIZ", ar: "COVA QUIZ" }, icon: Gamepad2 },
     ],
   },
   {
