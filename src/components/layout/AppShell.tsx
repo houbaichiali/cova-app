@@ -23,7 +23,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Keeps one voice room alive across page navigation (mic + peers + SSE). */}
       <RoomRuntimeProvider>
         <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
-        <div className={dir === "rtl" ? "lg:pr-64" : "lg:pl-64"}>
+        {/* The collapsed icon rail is 66px; hover expands the sidebar over the
+            content, so the resting offset matches the rail. Touch pointers keep
+            the sidebar fully expanded with the classic 64 (16rem) offset. */}
+        <div
+          className={
+            dir === "rtl"
+              ? "lg:pr-[66px] lg:pointer-coarse:pr-64"
+              : "lg:pl-[66px] lg:pointer-coarse:pl-64"
+          }
+        >
           <Header onMenuClick={() => setNavOpen(true)} />
           <main id="main" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
             {children}

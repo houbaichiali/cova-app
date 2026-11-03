@@ -5,10 +5,12 @@ interface LogoProps {
   className?: string;
   showTagline?: boolean;
   href?: string;
+  /** Renders only the SVG mark (icon rails, compact headers). */
+  markOnly?: boolean;
 }
 
 /** Reusable COVA wordmark. Pure SVG + text, no image assets required. */
-export function Logo({ className, showTagline = false, href = "/" }: LogoProps) {
+export function Logo({ className, showTagline = false, href = "/", markOnly = false }: LogoProps) {
   return (
     <Link
       href={href}
@@ -34,14 +36,16 @@ export function Logo({ className, showTagline = false, href = "/" }: LogoProps) 
           strokeLinejoin="round"
         />
       </svg>
-      <span className="flex flex-col leading-none">
-        <span className="text-lg font-semibold tracking-[0.18em] text-cova-ink">COVA</span>
-        {showTagline && (
-          <span className="mt-1 text-[11px] font-medium text-cova-mute">
-            Community Of Visionary Achievers
-          </span>
-        )}
-      </span>
+      {!markOnly && (
+        <span className="flex flex-col leading-none">
+          <span className="text-lg font-semibold tracking-[0.18em] text-cova-ink">COVA</span>
+          {showTagline && (
+            <span className="mt-1 text-[11px] font-medium text-cova-mute">
+              Community Of Visionary Achievers
+            </span>
+          )}
+        </span>
+      )}
     </Link>
   );
 }
