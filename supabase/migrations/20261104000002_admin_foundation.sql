@@ -207,19 +207,27 @@ begin
 end;
 $$;
 
--- Internal audit writer for the definer RPCs of later phases.
+-- Internal audit writer for the definer RPCs of later phases. The actor is
+-- passed explicitly: inside security-definer code auth.uid() is NULL (the
+-- code runs as the table owner, not as the signed-in user).
 create or replace function public.admin_audit(
   p_action text,
   p_target_type text default '',
   p_target_id text default '',
   p_reason text default '',
-  p_metadata jsonb default '[]'::jsonb
+  p_metadata jsonb default '[]'::jsonb,
+  p_actor uuid default null
 )
 returns void
 language plpgsql security definer set search_path = public as $$
+declare
+  v_actor uuid := coalesce(p_actor, auth.uid());
 begin
+  if v_actor is null then
+    raise exception 'admin_audit requires an actor: no session and no explicit actor given';
+  end if;
   insert into public.admin_audit_logs (actor_id, action, target_type, target_id, reason, metadata)
-  values (auth.uid(), p_action, p_target_type, p_target_id, p_reason, p_metadata);
+  values (v_actor, p_action, p_target_type, p_target_id, p_reason, p_metadata);
 end;
 $$;
 
@@ -243,7 +251,7 @@ begin
   if v_user is null then raise exception 'Unknown user code'; end if;
   insert into public.user_admin_roles (user_id, role_key, granted_by)
   values (v_user, 'founder', v_user);
-  perform public.admin_audit('admin.grant_role', 'user', v_user::text, 'Initial founder bootstrap');
+  perform public.admin_audit('admin.grant_role', 'user', v_user::text, 'Initial founder bootstrap', '[]'::jsonb, v_user);
 end;
 $$;
 revoke all on function public.admin_grant_founder(text) from public, authenticated, anon;

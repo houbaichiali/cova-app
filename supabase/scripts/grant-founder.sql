@@ -9,5 +9,9 @@
 
 select public.admin_grant_founder('CV-MTXV8U8G');
 
--- Verify (should return is_admin = true, role = founder):
-select public.admin_my_access();
+-- Verify (the row below must exist with role_key = founder):
+select uar.user_id, uar.role_key, r.label, uar.granted_at
+from public.user_admin_roles uar
+join public.admin_roles r on r.key = uar.role_key;
+-- (admin_my_access() returns is_admin = false here because the SQL editor is
+-- not a signed-in user session — the real check happens in the app.)
