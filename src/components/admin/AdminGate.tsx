@@ -23,10 +23,12 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rawError, setRawError] = useState<string | null>(null);
 
   async function start() {
     setBusy(true);
     setError(null);
+    setRawError(null);
     try {
       const supabase = getSupabase();
       const { data, error } = await supabase.auth.mfa.enroll({
@@ -43,8 +45,10 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
       });
       if (challengeError) throw challengeError;
       setChallengeId(challenge.id);
-    } catch {
+    } catch (e) {
       setError(t("admin.mfa.error"));
+      // Surface the real reason (e.g. "MFA is disabled for this project").
+      setRawError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -106,9 +110,16 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
           </>
         )}
         {error && !qr && (
-          <p role="alert" className="text-xs font-medium text-red-800">
-            {error}
-          </p>
+          <div className="text-xs">
+            <p role="alert" className="font-medium text-red-800">
+              {error}
+            </p>
+            {rawError && (
+              <p className="mt-1 rounded bg-red-50 px-2 py-1 font-mono text-[11px] text-red-900">
+                {rawError}
+              </p>
+            )}
+          </div>
         )}
       </CardBody>
     </Card>
