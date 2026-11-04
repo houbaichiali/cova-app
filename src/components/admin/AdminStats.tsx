@@ -35,6 +35,7 @@ export function AdminStats() {
   const { formatTag } = useI18n();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState(false);
+  const [rawError, setRawError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +44,7 @@ export function AdminStats() {
       if (cancelled) return;
       if (error) {
         setError(true);
+        setRawError(error.message);
         return;
       }
       setStats(data as DashboardStats);
@@ -55,7 +57,12 @@ export function AdminStats() {
   if (error) {
     return (
       <Card>
-        <CardBody className="text-sm font-medium text-red-800">{t("admin.stats.error")}</CardBody>
+        <CardBody className="text-sm text-red-800">
+          <p role="alert" className="font-medium">{t("admin.stats.error")}</p>
+          {rawError && (
+            <p className="mt-1 rounded bg-red-50 px-2 py-1 font-mono text-[11px]">{rawError}</p>
+          )}
+        </CardBody>
       </Card>
     );
   }
