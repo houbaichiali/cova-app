@@ -21,6 +21,8 @@ interface AdminAccessData {
 }
 
 export interface AdminAccessState extends AdminAccessData {
+  /** Re-queries admin_my_access (after MFA enrollment, role change…). */
+  reload: () => void;
   can: (permission: string) => boolean;
 }
 
@@ -36,6 +38,7 @@ const DENIED: AdminAccessData = { loading: false, isAdmin: false, role: null, pe
 
 export function useAdminAccess(): AdminAccessState {
   const [state, setState] = useState<AdminAccessData>(EMPTY);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,10 +70,11 @@ export function useAdminAccess(): AdminAccessState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   return {
     ...state,
+    reload: () => setReloadKey((k) => k + 1),
     can: (permission: string) => state.permissions.includes(permission),
   };
 }

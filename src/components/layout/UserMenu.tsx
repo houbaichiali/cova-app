@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, CircleUserRound, LogOut, Settings } from "lucide-react";
+import { ChevronDown, CircleUserRound, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
+import { useAdminAccess } from "@/lib/admin-client";
 import { getSupabase } from "@/lib/supabase/client";
 import { useOutsideClose } from "@/lib/use-outside-close";
 
 /**
  * The signed-in person's menu: photo, links to their profile and the settings,
  * and the real sign-out. Profile details are edited on /profile.
+ * Admins also get the workspace switcher entry to the Admin Center — the
+ * entry only appears for accounts whose admin role the database confirms.
  */
 export function UserMenu() {
   const [open, setOpen] = useState(false);
@@ -23,6 +26,7 @@ export function UserMenu() {
   const router = useRouter();
   const toast = useToast();
   const t = useT();
+  const admin = useAdminAccess();
 
   const close = useCallback(() => setOpen(false), []);
   useOutsideClose(ref, open, close);
@@ -107,6 +111,14 @@ export function UserMenu() {
             <Settings className="h-4 w-4" aria-hidden="true" />
             {t("user.settings")}
           </Link>
+
+          {admin.isAdmin && (
+            <Link href="/admin" role="menuitem" onClick={close} className={itemClass}>
+              <ShieldCheck className="h-4 w-4 text-cova-muted" aria-hidden="true" />
+              {t("admin.switch.toAdmin")}
+              {!admin.mfaOk && <span className="ms-auto text-xs text-amber-700">{t("admin.mfa.requiredShort")}</span>}
+            </Link>
+          )}
 
           <button
             type="button"

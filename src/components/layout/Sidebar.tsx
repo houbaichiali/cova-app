@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
 import { useI18n, useT } from "@/i18n/client";
+import { useAdminAccess } from "@/lib/admin-client";
 import { navSections } from "@/lib/navigation";
 import { useSocial } from "@/lib/social-store";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const { dir } = useI18n();
   const social = useSocial();
   const unread = social.notifications.filter((n) => n.readAt === null).length;
+  // The Admin Center entry exists only for accounts the database recognizes
+  // as admins — never shown (even hidden) for ordinary students.
+  const admin = useAdminAccess();
 
   // Labels live in the fixed-width content, clipped by the collapsed rail and
   // faded to 0 so no letter peeks out; they reveal themselves on expansion.
@@ -87,6 +91,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 </p>
                 <ul className="space-y-0.5">
                   {section.items.map(({ href, labelKey, label, icon: Icon }, index) => {
+                    if (href === "/admin" && !admin.isAdmin) return null;
                     const active = pathname === href || pathname.startsWith(`${href}/`);
                     const itemKey = `${section.titleKey}-${href}-${index}`;
                     const itemLabel = label ? (label as Record<string, string>)["en"] : undefined;
