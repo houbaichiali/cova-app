@@ -5,15 +5,17 @@ import Link from "next/link";
 import { Crown, Lock, Medal, Trophy } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
-import { Card, CardBody } from "@/components/ui/Card";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Tabs } from "@/components/ui/Tabs";
+import { XpAnalytics } from "@/components/learning/XpAnalytics";
 import { useI18n } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 import { useS } from "@/i18n/spaces";
 import { friendsOf, useSocial } from "@/lib/social-store";
+import { periodEnd, periodStart, type XpEntry, type XpPeriodKind } from "@/lib/xp-analytics";
 import {
   buildBadgeList,
   CATEGORIES,
@@ -81,13 +83,22 @@ export function LeaderboardPageContent() {
   const meId = social.meId ?? "";
   const [tab, setTab] = useState<"xp" | "badges">("xp");
   const [rows, setRows] = useState<Awaited<ReturnType<typeof fetchFriendsLeaderboard>>>([]);
-  const [loading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<string>("all");
   const [rarity, setRarity] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<"all" | "unlocked" | "locked" | "progress">("all");
   const [query, setQuery] = useState("");
   const [compareFriend, setCompareFriend] = useState<string>("");
   const [comparison, setComparison] = useState<Record<string, unknown> | null>(null);
+
+  // Period selection shared by the chart and both rankings.
+  const [periodKind, setPeriodKind] = useState<XpPeriodKind>("week");
+  const [periodAnchor, setPeriodAnchor] = useState<Date>(() => periodStart("week", new Date()));
+  // Full personal ledger (chart), per-period sums (rankings), global rank.
+  const [ledgerFull, setLedgerFull] = useState<XpEntry[] | null>(null);
+  const [periodSums, setPeriodSums] = useState<Record<string, number> | null>(null);
+  const [sumsError, setSumsError] = useState(false);
+  const [globalRank, setGlobalRank] = useState<number | null>(null);
 
   const { definitions, myBadges, metrics, ledger, xp, togglePin } = useGamification();
   const friends = useMemo(() => (meId ? friendsOf(social, meId) : []), [social, meId]);
@@ -96,9 +107,93 @@ export function LeaderboardPageContent() {
   useEffect(() => {
     if (!social.ready || !meId) return;
     void fetchFriendsLeaderboard(meId, friendCodes)
-      .then(setRows)
-      .catch(() => setRows([]));
+      .then((data) => {
+        setRows(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setRows([]);
+        setLoading(false);
+      });
   }, [social.ready, meId, friendCodes.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps -- refetch when the friend set changes
+
+  // Full personal XP history: the chart and period stats use real gains,
+  // never a delta of the current total.
+  useEffect(() => {
+    if (!meId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await getSupabase()
+        .from("xp_ledger")
+        .select("amount,created_at")
+        .order("created_at")
+        .limit(2000);
+      if (cancelled) return;
+      const entries: XpEntry[] = (data ?? []).map((row) => ({
+        amount: Number(row.amount),
+        createdAt: String(row.created_at),
+      }));
+      setLedgerFull(error ? [] : entries);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meId]);
+
+  // Per-period gains for me + friends (server-side aggregate, RLS-safe).
+  const periodKey = `${periodKind}-${periodAnchor.getTime()}`;
+  useEffect(() => {
+    if (!meId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const start = periodStart(periodKind, periodAnchor);
+        const end = periodEnd(periodKind, periodAnchor);
+        const { data, error } = await getSupabase().rpc("xp_period_sums", {
+          p_start: start.toISOString(),
+          p_end: end.toISOString(),
+        });
+        if (cancelled) return;
+        if (error) throw error;
+        const map: Record<string, number> = {};
+        for (const row of (data ?? []) as Array<{ user_code: string | null; xp_gained: number }>) {
+          if (row.user_code) map[row.user_code] = Number(row.xp_gained);
+        }
+        setPeriodSums(map);
+        setSumsError(false);
+      } catch {
+        if (!cancelled) {
+          setPeriodSums(null);
+          setSumsError(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meId, periodKey]); // eslint-disable-line react-hooks/exhaustive-deps -- periodKey covers the range
+
+  // Global rank: how many profiles hold more total XP than me.
+  useEffect(() => {
+    if (xp === null || !meId) return;
+    let cancelled = false;
+    void (async () => {
+      const { count, error } = await getSupabase()
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .gt("xp", xp);
+      if (cancelled) return;
+      setGlobalRank(error ? null : (count ?? 0) + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [xp, meId]);
+
+  // Derived views (no cascading state): signed-out clears the chart and rank.
+  const chartEntries = meId ? (ledgerFull ?? []) : [];
+  const chartLoading = !!meId && ledgerFull === null;
+  const effectiveRank = meId && xp !== null ? globalRank : null;
 
   const badgeList = useMemo(
     () => (definitions && myBadges && metrics ? buildBadgeList(definitions, myBadges, metrics) : []),
@@ -120,6 +215,24 @@ export function LeaderboardPageContent() {
   const totalFriends = rows.length - (meRow ? 1 : 0);
   const tabXp = t("lb.tab.xp");
   const tabBadges = t("lb.tab.badges");
+
+  // Ranking over the selected period: me + friends, best gains first.
+  // When period sums are unavailable the total XP order is the fallback.
+  const rankedRows = useMemo(() => {
+    const sorted = [...rows];
+    if (sumsError) {
+      sorted.sort((a, b) => b.xp - a.xp);
+    } else {
+      sorted.sort(
+        (a, b) => (periodSums?.[b.userCode] ?? 0) - (periodSums?.[a.userCode] ?? 0) || b.xp - a.xp,
+      );
+    }
+    return sorted.map((row, index) => ({ ...row, rank: index + 1 }));
+  }, [rows, periodSums, sumsError]);
+
+  const periodGainedFor = (userCode: string): number | "—" =>
+    sumsError ? "—" : periodSums?.[userCode] ?? 0;
+  const periodHasData = !sumsError && rankedRows.some((row) => (periodSums?.[row.userCode] ?? 0) > 0);
 
   async function loadComparison(friendCode: string) {
     setCompareFriend(friendCode);
@@ -173,62 +286,132 @@ export function LeaderboardPageContent() {
       </div>
 
       {tab === "xp" ? (
-        <>
-          <p className="mb-4 rounded-lg bg-cova-pale px-4 py-3 text-sm">
-            {t("lb.friendsCount", { count: Math.max(0, totalFriends) })}
-          </p>
-          {loading ? (
-            <p className="text-sm text-cova-mute">{t("lb.loading")}</p>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-cova-mute">{t("lb.noFriendsYet")}</p>
-          ) : (
-            <Card className="overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="border-b border-cova-line bg-cova-bg text-start text-cova-mute">
-                  <tr>
-                    <th scope="col" className="w-16 px-4 py-3 text-start font-medium">{t("lb.rank")}</th>
-                    <th scope="col" className="px-4 py-3 text-start font-medium">{t("lb.student")}</th>
-                    <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t("lb.level")}</th>
-                    <th scope="col" className="px-4 py-3 text-end font-medium">{t("lb.xp")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-cova-line">
-                  {rows.slice(0, 10).map((row) => {
-                    const level = levelForXp(row.xp);
-                    return (
-                      <tr key={row.userCode} className={cn(row.isMe && "bg-cova-pale/60")}>
-                        <td className="px-4 py-3 font-medium">
-                          {row.rank <= 3 ? (
-                            <span className="flex items-center gap-1.5">
-                              {row.rank === 1 ? <Crown className="h-4 w-4 text-yellow-500" aria-hidden="true" /> : <Medal className="h-4 w-4 text-cova-muted" aria-hidden="true" />}
-                              {row.rank}
-                            </span>
-                          ) : row.rank}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="flex items-center gap-3">
-                            <Avatar name={row.displayName} size="sm" />
-                            <span className="font-medium">{row.displayName}{row.isMe && ` (${t("lb.you")})`}</span>
-                          </span>
-                        </td>
-                        <td className="hidden px-4 py-3 text-cova-mute sm:table-cell">{level.name} · {level.level}</td>
-                        <td className="px-4 py-3 text-end font-medium">{row.xp.toLocaleString(formatTag)}</td>
-                      </tr>
-                    );
-                  })}
-                  {meRow && meRow.rank > 10 && (
-                    <tr className="bg-cova-pale/60">
-                      <td className="px-4 py-3 font-medium">{meRow.rank}</td>
-                      <td className="px-4 py-3"><span className="font-medium">{meRow.displayName} ({t("lb.you")})</span></td>
-                      <td className="hidden px-4 py-3 text-cova-mute sm:table-cell">{levelForXp(meRow.xp).name}</td>
-                      <td className="px-4 py-3 text-end font-medium">{meRow.xp.toLocaleString(formatTag)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+        <div className="space-y-4">
+          <XpAnalytics
+            entries={chartEntries}
+            loading={chartLoading}
+            kind={periodKind}
+            anchor={periodAnchor}
+            onKindChange={setPeriodKind}
+            onAnchorChange={setPeriodAnchor}
+          />
+
+          {meRow && (
+            <Card>
+              <CardHeader title={t("lb.mine.title")} />
+              <CardBody className="flex flex-wrap items-center gap-5">
+                <Avatar name={meRow.displayName} size="lg" />
+                <div className="min-w-48 flex-1">
+                  <p className="text-sm font-semibold text-cova-ink">
+                    {meRow.displayName} <span className="text-cova-mute">({t("lb.you")})</span>
+                  </p>
+                  <p className="text-xs text-cova-mute">
+                    {t("lb.mine.level", { level: myLevel.level })} ·{" "}
+                    {t("lb.mine.progress", {
+                      into: myLevel.into,
+                      needed: myLevel.needed,
+                      next: myLevel.level + 1,
+                    })}
+                  </p>
+                  <ProgressBar
+                    value={myLevel.into}
+                    max={myLevel.needed}
+                    label={t("lb.mine.level", { level: myLevel.level })}
+                    className="mt-1.5"
+                  />
+                </div>
+                <dl className="grid grid-cols-3 gap-4 text-center text-sm">
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-cova-mute">{t("lb.mine.globalRank")}</dt>
+                    <dd className="text-xl font-semibold tabular-nums text-cova-ink">
+                      {effectiveRank ?? "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-cova-mute">{t("lb.mine.total")}</dt>
+                    <dd className="text-xl font-semibold tabular-nums text-cova-ink">
+                      {(meRow.xp ?? 0).toLocaleString(formatTag)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-cova-mute">{t("lb.mine.gained")}</dt>
+                    <dd className="text-xl font-semibold tabular-nums text-cova-ink">
+                      {typeof (periodGainedFor(meRow.userCode)) === "number"
+                        ? (periodGainedFor(meRow.userCode) as number).toLocaleString(formatTag)
+                        : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </CardBody>
             </Card>
           )}
-        </>
+
+          <Card className="overflow-hidden">
+            <CardHeader
+              title={t("lb.friends.title")}
+              description={
+                sumsError
+                  ? t("lb.friends.fallback")
+                  : t("lb.friendsCount", { count: Math.max(0, totalFriends) })
+              }
+            />
+            <CardBody className="p-0">
+              {loading ? (
+                <p className="p-5 text-sm text-cova-mute">{t("lb.loading")}</p>
+              ) : rows.length === 0 ? (
+                <p className="p-5 text-sm text-cova-mute">{t("lb.noFriendsYet")}</p>
+              ) : (
+                <>
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-cova-line bg-cova-bg text-start text-cova-mute">
+                      <tr>
+                        <th scope="col" className="w-16 px-4 py-3 text-start font-medium">{t("lb.rank")}</th>
+                        <th scope="col" className="px-4 py-3 text-start font-medium">{t("lb.student")}</th>
+                        <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t("lb.level")}</th>
+                        <th scope="col" className="px-4 py-3 text-end font-medium">{t("lb.friends.periodXp")}</th>
+                        <th scope="col" className="px-4 py-3 text-end font-medium">{t("lb.friends.totalXp")}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-cova-line">
+                      {rankedRows.map((row) => {
+                        const level = levelForXp(row.xp);
+                        const gained = periodGainedFor(row.userCode);
+                        return (
+                          <tr key={row.userCode} className={cn(row.isMe && "bg-cova-pale/60")}>
+                            <td className="px-4 py-3 font-medium">
+                              {row.rank <= 3 ? (
+                                <span className="flex items-center gap-1.5">
+                                  {row.rank === 1 ? <Crown className="h-4 w-4 text-yellow-500" aria-hidden="true" /> : <Medal className="h-4 w-4 text-cova-muted" aria-hidden="true" />}
+                                  {row.rank}
+                                </span>
+                              ) : row.rank}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="flex items-center gap-3">
+                                <Avatar name={row.displayName} size="sm" />
+                                <span className="font-medium">{row.displayName}{row.isMe && ` (${t("lb.you")})`}</span>
+                              </span>
+                            </td>
+                            <td className="hidden px-4 py-3 text-cova-mute sm:table-cell">{level.name} · {level.level}</td>
+                            <td className="px-4 py-3 text-end font-medium">
+                              {typeof gained === "number" ? gained.toLocaleString(formatTag) : gained}
+                            </td>
+                            <td className="px-4 py-3 text-end text-cova-mute">{row.xp.toLocaleString(formatTag)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!periodHasData && !sumsError && (
+                    <p className="border-t border-cova-line px-4 py-3 text-xs text-cova-mute">
+                      {t("lb.friends.empty")}
+                    </p>
+                  )}
+                </>
+              )}
+            </CardBody>
+          </Card>
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">

@@ -47,31 +47,12 @@ export interface LedgerEntry {
   created_at: string;
 }
 
-/** Level thresholds from the COVA spec (mirrored client-side for display). */
-const LEVELS: Array<[number, number, string]> = [
-  [8, 10000, "Legend"],
-  [7, 6000, "Master"],
-  [6, 3000, "Expert"],
-  [5, 1500, "Scholar"],
-  [4, 700, "Achiever"],
-  [3, 300, "Learner"],
-  [2, 100, "Explorer"],
-  [1, 0, "Beginner"],
-];
-
-export function levelForXp(xp: number): { level: number; name: string; into: number; needed: number } {
-  const current = LEVELS.find(([, minXp]) => xp >= minXp) ?? [1, 0, "Beginner"];
-  const next = LEVELS.filter(([, minXp]) => minXp > xp).at(-1);
-  const [level, , name] = current;
-  const nextMinXp = next?.[1] ?? null;
-  const currentMinXp = current[1];
-  return {
-    level,
-    name,
-    into: xp - currentMinXp,
-    needed: nextMinXp !== null ? nextMinXp - currentMinXp : 0,
-  };
-}
+/**
+ * Level curve lives in level-curve.ts (pure, no imports): one formula backs
+ * the UI, the SQL function and the tests. Re-exported here so existing call
+ * sites keep working.
+ */
+export { levelForXp, levelThreshold, levelStep, levelName } from "@/lib/level-curve";
 
 /* ---------------------------------------------------------------- fetching */
 

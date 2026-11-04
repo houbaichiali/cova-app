@@ -1,9 +1,8 @@
 import { challenges } from "@/data/challenges";
 import { currentUser, students } from "@/data/students";
 import type { DemoState } from "@/lib/demo-store";
+import { levelForXp } from "@/lib/gamification";
 import type { Course } from "@/types";
-
-export const XP_PER_LEVEL = 500;
 const XP_PER_LESSON = 15;
 const XP_PER_VOICE_MINUTE = 1;
 const XP_PER_HOSTED_SPACE = 20;
@@ -44,12 +43,14 @@ export function computeXp(state: DemoState): number {
   );
 }
 
+/**
+ * Levels now share the global curve from gamification.ts (Level 0 at 0 XP,
+ * +100 XP per level). Kept as a thin alias so demo-mode components keep
+ * their call sites unchanged — one formula everywhere.
+ */
 export function levelFor(xp: number): { level: number; into: number; needed: number } {
-  return {
-    level: Math.floor(xp / XP_PER_LEVEL) + 1,
-    into: xp % XP_PER_LEVEL,
-    needed: XP_PER_LEVEL,
-  };
+  const { level, into, needed } = levelForXp(xp);
+  return { level, into, needed };
 }
 
 export interface LeaderboardEntry {
