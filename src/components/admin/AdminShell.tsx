@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, LayoutDashboard, Menu, Users, X } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Menu, ShieldAlert, Users, X } from "lucide-react";
 import { useAdminAccess } from "@/lib/admin-client";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ interface AdminNavItem {
 const NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin", labelKey: "admin.nav.dashboard", icon: LayoutDashboard },
   { href: "/admin/users", labelKey: "admin.nav.users", icon: Users, permission: "users.read" },
+  { href: "/admin/moderation", labelKey: "admin.nav.moderation", icon: ShieldAlert, permission: "moderation.reports.read" },
 ];
 
 /** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents. */
