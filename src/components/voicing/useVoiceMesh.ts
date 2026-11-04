@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Signal } from "@/lib/spaces-client";
-import { injectKey, injectPointer, injectWheel, ctlVerifyDecision } from "./roomControl";
+import {
+  ctlVerifyDecision,
+  injectKey,
+  injectPointer,
+  injectWheel,
+  lateJoinPushes,
+} from "./roomControl";
 
 /**
  * Full-mesh WebRTC audio for voice rooms, hardened for cross-device calls:
@@ -104,6 +110,8 @@ export interface RoomVoiceCtlActions {
   up: (x: number, y: number) => void;
   wheel: (x: number, y: number, dx: number, dy: number) => void;
   key: (kind: "kd" | "ku", key: string) => void;
+  /** Speaker: tell the room "I am dubbing into this language" (broadcast). */
+  broadcastDub: (on: boolean, lang: string) => void;
 }
 
 type CtlMsg =
@@ -115,6 +123,7 @@ type CtlMsg =
   | { t: "ctl-revoke" }
   | { t: "ctl-state"; allowed: boolean; code: string | null; controlledBy: string | null }
   | { t: "cam"; on: boolean; facing: "user" | "environment" }
+  | { t: "dub"; on: boolean; lang: string }
   | { t: "pt" | "pd" | "pu"; x: number; y: number }
   | { t: "wh"; x: number; y: number; dx: number; dy: number }
   | { t: "kd" | "ku"; key: string };
@@ -147,6 +156,10 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remoteVideos, setRemoteVideos] = useState<Record<string, MediaStream>>({});
+  /** Signaled screen sharers — the ONLY source of truth for the overlay. */
+  const [remoteShares, setRemoteShares] = useState<Record<string, boolean>>({});
+  /** uid -> dubbing state of that peer (broadcast dubbing). */
+  const [remoteDubs, setRemoteDubs] = useState<Record<string, string>>({});
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const [camFacing, setCamFacing] = useState<"user" | "environment">("user");
   const [remoteCams, setRemoteCams] = useState<Record<string, MediaStream>>({});
@@ -162,6 +175,8 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
   const retryRef = useRef<(() => void) | null>(null);
   const deafRef = useRef(false);
   const ctlRef = useRef<RoomVoiceCtl>(EMPTY_CTL);
+  const sharingRef = useRef(false);
+  const dubRef = useRef({ on: false, lang: "" });
   const sendRef = useRef(sendSignal);
   const meRef = useRef(meUid);
   useEffect(() => {
@@ -282,6 +297,15 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       const cur = ctlRef.current;
       switch (msg.t) {
         case "share": {
+          // Signaled share state — the overlay renders only from this, never
+          // from a bare WebRTC track (that is what created ghost screens).
+          setRemoteShares((prev) => {
+            if (msg.on) return prev[uid] ? prev : { ...prev, [uid]: true };
+            if (!(uid in prev)) return prev;
+            const next = { ...prev };
+            delete next[uid];
+            return next;
+          });
           if (!msg.on && (cur.controlling === uid || cur.requested === uid)) {
             patchCtl({
               controlling: cur.controlling === uid ? null : cur.controlling,
@@ -292,9 +316,9 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
           return;
         }
         case "ctl-req": {
-          // I am the host: the viewer will send the code next; nothing to do
-          // here beyond a polite rejection when control is not allowed.
-          if (!cur.allowed || !cur.code) ctlSend(uid, { t: "ctl-deny" });
+          // I am the host: the viewer will send the code next; a polite
+          // rejection with the reason when control is not enabled.
+          if (!cur.allowed || !cur.code) ctlSend(uid, { t: "ctl-deny", why: "off" });
           return;
         }
         case "ctl-verify": {
@@ -333,6 +357,18 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
           });
           return;
         }
+        case "dub": {
+          // Broadcast dubbing: everyone tracks who is dubbing into which
+          // language, so listeners can duck the raw mic and speak the dub.
+          setRemoteDubs((prev) => {
+            if (msg.on) return prev[uid] === msg.lang ? prev : { ...prev, [uid]: msg.lang };
+            if (!(uid in prev)) return prev;
+            const next = { ...prev };
+            delete next[uid];
+            return next;
+          });
+          return;
+        }
         case "ctl-grant": {
           if (cur.requested === uid) patchCtl({ controlling: uid, requested: null, notice: null });
           return;
@@ -341,7 +377,12 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
           if (cur.requested === uid)
             patchCtl({
               requested: null,
-              notice: msg.why === "busy" ? "room.ctlBusy" : "room.ctlWrong",
+              notice:
+                msg.why === "busy"
+                  ? "room.ctlBusy"
+                  : msg.why === "off"
+                    ? "room.ctlOff"
+                    : "room.ctlWrong",
             });
           return;
         }
@@ -397,8 +438,46 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
           /* malformed message */
         }
       };
+      // enableControl() only reaches channels that are already open, so a
+      // viewer who joined later never saw the code-entry form. Push the
+      // host's control state every time a control channel becomes usable.
+      const pushCtlState = () => {
+        const cur = ctlRef.current;
+        if (cur.allowed || cur.controlledBy)
+          broadcastCtlState({ allowed: cur.allowed, code: cur.code, controlledBy: cur.controlledBy });
+      };
+      if (ch.readyState === "open") pushCtlState();
+      else ch.onopen = pushCtlState;
+      // Late joiners must also learn the live share / camera / dub state —
+      // none of that may depend on catching an old broadcast. A track alone
+      // is never treated as proof of sharing (that rendered ghost screens).
+      const syncLate = () => {
+        pushCtlState();
+        for (const m of lateJoinPushes({
+          sharing: sharingRef.current,
+          camOn: !!camTrackRef.current,
+          camFacing: camFacingRef.current,
+          dubOn: dubRef.current.on,
+          dubLang: dubRef.current.lang,
+        }))
+          ctlSend(uid, m as CtlMsg);
+      };
+      if (ch.readyState === "open") syncLate();
+      else ch.onopen = syncLate;
       ch.onclose = () => {
         if (p.ctl === ch) p.ctl = null;
+        setRemoteShares((prev) => {
+          if (!(uid in prev)) return prev;
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
+        setRemoteDubs((prev) => {
+          if (!(uid in prev)) return prev;
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
         const cur = ctlRef.current;
         if (cur.controlling === uid || cur.requested === uid || cur.controlledBy === uid) {
           const next = {
@@ -413,7 +492,7 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         }
       };
     },
-    [handleCtl, patchCtl, broadcastCtlState],
+    [handleCtl, patchCtl, broadcastCtlState, ctlSend],
   );
 
   /* ------------------------------ peers ------------------------------ */
@@ -630,8 +709,11 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       void ac.close().catch(() => undefined);
       if (ctx.current === ac) ctx.current = null;
       setSharing(false);
+      sharingRef.current = false;
       setShareNotice(null);
       setRemoteVideos({});
+      setRemoteShares({});
+      setRemoteDubs({});
       setCamStream(null);
       setCamFacing("user");
       camFacingRef.current = "user";
@@ -688,10 +770,24 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         p.audio.remove();
         peers.current.delete(uid);
         dropVideo(uid);
+        dropCam(uid);
+        // A gone peer cannot be sharing, dubbing or holding the control.
+        setRemoteShares((prev) => {
+          if (!(uid in prev)) return prev;
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
+        setRemoteDubs((prev) => {
+          if (!(uid in prev)) return prev;
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, peerKey, meUid, ensurePeer, dropVideo]);
+  }, [enabled, peerKey, meUid, ensurePeer, dropVideo, dropCam]);
 
   /* --------------------------- signaling --------------------------- */
 
@@ -742,6 +838,7 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     const track = screenTrack.current;
     screenTrack.current = null;
     setScreenStream(null);
+    sharingRef.current = false;
     if (track) track.stop();
     peers.current.forEach((p) => {
       const sender = p.videoTransceiver.sender; // screen m-line only, not the camera
@@ -788,6 +885,7 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         }
       });
       track.onended = () => stopShare();
+      sharingRef.current = true;
       setSharing(true);
       setShareNotice(null);
       ctlBroadcast({ t: "share", on: true });
@@ -951,6 +1049,12 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       const uid = ctlRef.current.controlling;
       if (uid) ctlSend(uid, { t: kind, key });
     },
+    /** Speaker: publish "I dub into lang" so the room ducks my raw mic and
+        hears the translation even before the first caption line lands. */
+    broadcastDub: (on, lang) => {
+      dubRef.current = { on, lang };
+      ctlBroadcast({ t: "dub", on, lang });
+    },
   };
 
   /* -------- one-time tap-anywhere audio unlock (mobile autoplay) -------- */
@@ -981,6 +1085,8 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     shareNotice,
     screenStream,
     remoteVideos,
+    remoteShares,
+    remoteDubs,
     camOn: !!camStream,
     camStream,
     camFacing,

@@ -203,6 +203,7 @@ export function VoiceRoom({ code }: { code: string }) {
       <ScreenShareOverlay
         members={membersName}
         remoteVideos={runtime.remoteVideos}
+        remoteShares={runtime.remoteShares}
         myScreen={runtime.screenStream}
         sharing={runtime.sharing}
         ctl={runtime.ctl}
@@ -236,72 +237,89 @@ export function VoiceRoom({ code }: { code: string }) {
           onFlip={() => void runtime.flipCam()}
           onStop={() => void runtime.toggleCam()}
         />
-        {/* Bottom control bar: mute / dubbing / share / camera / remote / leave. */}
-        <div className="absolute inset-x-0 bottom-4 flex flex-wrap items-center justify-center gap-2 px-3">
-          <Button
-            size="lg"
-            variant={runtime.muted || runtime.micError ? "danger" : "secondary"}
-            onClick={() => {
-              if (runtime.micError) runtime.retryMic();
-              else runtime.toggleMute(!runtime.muted);
-            }}
-            aria-pressed={runtime.muted}
-          >
-            {runtime.micError || runtime.muted ? (
-              <MicOff className="h-5 w-5" aria-hidden="true" />
-            ) : (
-              <Mic className="h-5 w-5" aria-hidden="true" />
-            )}
-            {runtime.micError
-              ? t("room.micRetry")
-              : runtime.muted
-                ? t("room.unmute")
-                : t("room.mute")}
-          </Button>
-          <Button
-            size="lg"
-            variant={dub.on ? "primary" : "secondary"}
-            onClick={dubClick}
-            aria-pressed={dub.on}
-            data-testid="dub-button"
-          >
-            <AudioLines className="h-5 w-5" aria-hidden="true" />
-            {dub.on
-              ? `${t("room.dub")} · ${findLang(dub.lang)?.label ?? ""}`
-              : t("room.dub")}
-          </Button>
-          <Button
-            size="lg"
-            variant={runtime.sharing ? "danger" : "secondary"}
-            onClick={() => void runtime.toggleShare()}
-            aria-pressed={runtime.sharing}
-          >
-            <MonitorUp className="h-5 w-5" aria-hidden="true" />
-            {runtime.sharing ? t("room.shareStop") : t("room.share")}
-          </Button>
-          <Button
-            size="lg"
-            variant={runtime.camOn ? "primary" : "secondary"}
-            onClick={() => void runtime.toggleCam()}
-            aria-pressed={runtime.camOn}
-          >
-            <Video className="h-5 w-5" aria-hidden="true" />
-            {runtime.camOn ? t("room.camStop") : t("room.cam")}
-          </Button>
-          <Button
-            size="lg"
-            variant="secondary"
-            className={cn(runtime.ctl.allowed && "border-cova-ink bg-cova-pale")}
-            onClick={remoteClick}
-          >
-            <MousePointerClick className="h-5 w-5" aria-hidden="true" />
-            {t("room.remote")}
-          </Button>
-          <Button size="lg" variant="danger" onClick={() => void leave()}>
-            <PhoneOff className="h-5 w-5" aria-hidden="true" />
-            {t("room.leave")}
-          </Button>
-        </div>
+      </div>
+
+      {/* Bottom control bar: its own strip below the stage — nothing floats
+          over the characters any more, and every button has a blue identity:
+          outline = idle, solid blue = active, red = stop / leave. */}
+      <div
+        className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-cova-line bg-white p-2 shadow-sm"
+        data-testid="control-bar"
+      >
+        <Button
+          size="lg"
+          variant={runtime.micError || runtime.muted ? "danger" : "primary"}
+          onClick={() => {
+            if (runtime.micError) runtime.retryMic();
+            else runtime.toggleMute(!runtime.muted);
+          }}
+          aria-pressed={runtime.muted}
+        >
+          {runtime.micError || runtime.muted ? (
+            <MicOff className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Mic className="h-5 w-5" aria-hidden="true" />
+          )}
+          {runtime.micError
+            ? t("room.micRetry")
+            : runtime.muted
+              ? t("room.unmute")
+              : t("room.mute")}
+        </Button>
+        <Button
+          size="lg"
+          variant={dub.on ? "primary" : "secondary"}
+          className={dub.on ? "" : "border-blue-200 text-blue-800 hover:bg-blue-50"}
+          onClick={dubClick}
+          aria-pressed={dub.on}
+          data-testid="dub-button"
+        >
+          <AudioLines className="h-5 w-5" aria-hidden="true" />
+          {dub.on
+            ? `${t("room.dub")} · ${findLang(dub.lang)?.label ?? ""}`
+            : t("room.dub")}
+        </Button>
+        <Button
+          size="lg"
+          variant={runtime.sharing ? "danger" : "secondary"}
+          className={runtime.sharing ? "" : "border-blue-200 text-blue-800 hover:bg-blue-50"}
+          onClick={() => void runtime.toggleShare()}
+          aria-pressed={runtime.sharing}
+        >
+          <MonitorUp className="h-5 w-5" aria-hidden="true" />
+          {runtime.sharing ? t("room.shareStop") : t("room.share")}
+        </Button>
+        <Button
+          size="lg"
+          variant={runtime.camOn ? "primary" : "secondary"}
+          className={runtime.camOn ? "" : "border-blue-200 text-blue-800 hover:bg-blue-50"}
+          onClick={() => void runtime.toggleCam()}
+          aria-pressed={runtime.camOn}
+        >
+          <Video className="h-5 w-5" aria-hidden="true" />
+          {runtime.camOn ? t("room.camStop") : t("room.cam")}
+        </Button>
+        <Button
+          size="lg"
+          variant={runtime.ctl.allowed || runtime.ctl.controlledBy ? "primary" : "secondary"}
+          className={
+            runtime.ctl.allowed || runtime.ctl.controlledBy
+              ? ""
+              : "border-blue-200 text-blue-800 hover:bg-blue-50"
+          }
+          onClick={remoteClick}
+        >
+          <MousePointerClick className="h-5 w-5" aria-hidden="true" />
+          {t("room.remote")}
+        </Button>
+        <Button
+          size="lg"
+          className="border border-red-600 bg-red-600 text-white hover:bg-red-700"
+          onClick={() => void leave()}
+        >
+          <PhoneOff className="h-5 w-5" aria-hidden="true" />
+          {t("room.leave")}
+        </Button>
       </div>
 
       {runtime.micError && (
@@ -310,7 +328,7 @@ export function VoiceRoom({ code }: { code: string }) {
         </p>
       )}
       {dubPick && !dub.on && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+        <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900" role="status">
           {t("room.dubPick")}
         </p>
       )}
@@ -329,9 +347,12 @@ export function VoiceRoom({ code }: { code: string }) {
             send={runtime.send}
             expanded={captionsOpen}
             setPeerVolume={runtime.setPeerVolume}
+            remoteDubs={runtime.remoteDubs}
             onDubChange={(on, lang) => {
               setDub({ on, lang });
               if (on) setDubPick(false);
+              // Broadcast dubbing: tell the room which language it will hear.
+              runtime.ctlActions.broadcastDub(on, lang);
             }}
             dubToggleN={dubToggleN}
             dubHighlight={dubPick}

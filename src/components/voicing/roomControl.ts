@@ -8,11 +8,27 @@
  * let a page drive itself, never the OS outside the document.
  */
 
+/** A synthetic click does not focus inputs — do it by hand like a real one. */
+function focusIfFocusable(el: Element): void {
+  const he = el as HTMLElement;
+  if (!he || typeof he.focus !== "function") return;
+  if (
+    he.tagName === "INPUT" ||
+    he.tagName === "TEXTAREA" ||
+    he.tagName === "SELECT" ||
+    he.tagName === "BUTTON" ||
+    he.isContentEditable ||
+    he.hasAttribute("tabindex")
+  )
+    he.focus();
+}
+
 export function injectPointer(type: "move" | "down" | "up", x: number, y: number): void {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return;
   const el = document.elementFromPoint(x, y);
   if (!el) return;
+  if (type === "down") focusIfFocusable(el);
   const init: MouseEventInit = {
     bubbles: true,
     cancelable: true,
@@ -49,8 +65,87 @@ export function injectWheel(x: number, y: number, dx: number, dy: number): void 
 
 export function injectKey(type: "keydown" | "keyup", key: string): void {
   if (!key || key.length > 32) return;
-  const target = document.activeElement ?? document.body;
+  const target = (document.activeElement as HTMLElement | null) ?? document.body;
   target.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true }));
+  if (type !== "keydown") return;
+  // A synthetic keydown never produces characters — write the text directly
+  // into the focused element, so remote typing really lands in inputs.
+  try {
+    if (key.length === 1) document.execCommand("insertText", false, key);
+    else if (key === "Backspace") document.execCommand("delete");
+  } catch {
+    /* nothing editable focused */
+  }
+}
+
+/* ----------------------- pure round-6 decisions ----------------------- */
+
+/**
+ * A peer counts as "sharing a screen" only when their client SIGNALED the
+ * share AND a live video stream actually arrived. WebRTC tracks alone are not
+ * proof: the pre-created sendrecv video transceivers used to surface stray
+ * muted tracks that rendered a ghost "sharing + black screen" for everyone
+ * right after joining, even when nobody was sharing at all.
+ */
+export function visibleSharers(
+  shares: Record<string, boolean>,
+  videos: Record<string, unknown>,
+): string[] {
+  return Object.keys(shares).filter((uid) => shares[uid] && !!videos[uid]);
+}
+
+export type CtlPanelMode =
+  | "host-code"
+  | "host-offer"
+  | "controlling"
+  | "taken"
+  | "enter"
+  | "idle";
+
+/**
+ * What the always-visible remote-control panel shows. The panel exists for
+ * EVERYONE at ALL times — the owner sees the code only once they grant
+ * control, while every other participant sees the code field from the very
+ * start (no button hunting, no conditional appearing).
+ */
+export function ctlPanelMode(s: {
+  sharing: boolean;
+  allowed: boolean;
+  controlling: string | null;
+  remoteCtlBy: string | null;
+  sharer: string | null;
+}): CtlPanelMode {
+  if (s.sharing) return s.allowed ? "host-code" : "host-offer";
+  if (s.controlling) return "controlling";
+  if (s.sharer && s.remoteCtlBy) return "taken";
+  if (s.sharer) return "enter";
+  return "idle";
+}
+
+export type LatePush = {
+  t: "share" | "cam" | "dub";
+  on: boolean;
+  facing?: "user" | "environment";
+  lang?: string;
+};
+
+/**
+ * Live room state a peer pushes the moment a control channel opens, so late
+ * joiners learn who shares a screen, who has the camera on and who is
+ * dubbing — none of that may depend on catching an old broadcast.
+ */
+export function lateJoinPushes(s: {
+  sharing: boolean;
+  camOn: boolean;
+  camFacing: "user" | "environment";
+  dubOn: boolean;
+  dubLang: string;
+}): LatePush[] {
+  const out: LatePush[] = [];
+  if (s.sharing) out.push({ t: "share", on: true });
+  if (s.camOn) out.push({ t: "cam", on: true, facing: s.camFacing });
+  if (s.dubOn) out.push({ t: "dub", on: true, lang: s.dubLang });
+  return out;
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));

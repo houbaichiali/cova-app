@@ -28,3 +28,22 @@ export function shouldRestartRecognition(
 export function nextFacing(f: Facing): Facing {
   return f === "user" ? "environment" : "user";
 }
+
+/**
+ * Broadcast dubbing (round 6): a caption that arrives ALREADY translated by
+ * the speaker (tt + tlang) is a deliberate broadcast — the whole room hears
+ * it spoken in the speaker's chosen language, whatever delivery mode the
+ * listeners picked. The speaker's own browser never speaks it back to them.
+ */
+export function isBroadcastDub(c: { tt?: string | null; tlang?: string | null }): boolean {
+  return !!c.tt && !!c.tlang;
+}
+
+/**
+ * Volume a ducked speaker's raw microphone returns to: while their dubbing is
+ * active the room must keep hearing the translation, not the original voice,
+ * so the restore level stays whisper-low until dubbing switches off.
+ */
+export function duckRestoreVolume(dubbingActive: boolean): number {
+  return dubbingActive ? 0.06 : 1;
+}

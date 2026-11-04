@@ -13,7 +13,12 @@ import {
   translate,
   useTargetLang,
 } from "@/components/voicing/useCaptionView";
-import { dubIsOn, shouldRestartRecognition } from "@/components/voicing/dubModel";
+import {
+  dubIsOn,
+  duckRestoreVolume,
+  isBroadcastDub,
+  shouldRestartRecognition,
+} from "@/components/voicing/dubModel";
 import type { Caption } from "@/server/spaces-store";
 import { cn } from "@/lib/utils";
 
@@ -70,17 +75,18 @@ function readSrcLang(): string {
 }
 
 /**
- * Live captions + the two-way dubbing engine for voice rooms.
+ * Live captions + the broadcast-dubbing engine for voice rooms.
+ *
+ * BROADCAST DUBBING (round 6): a speaker who turns dubbing on translates
+ * their speech and the WHOLE ROOM hears it — every listener's browser speaks
+ * the speaker's chosen language and ducks the raw microphone while the dub
+ * runs. The speaker does NOT hear their own translation; they simply keep
+ * hearing their own voice, like on any call.
  *
  * LISTEN DUBBING (everyone): pick "translate for me" — every line from the
  * others is translated into that language and, in auto-voice mode, spoken by
  * MY browser only. The speaker's raw microphone is ducked while the dub
  * plays, so the dub is what you actually hear.
- *
- * SPEAK DUBBING (speaker): pick a "dub my voice into" language — every final
- * recognition result is machine-translated, spoken on MY device and shared
- * pre-translated (tt + tlang), so the whole room can hear my chosen language
- * and read it under my character.
  *
  * The component stays mounted even when the panel is hidden (expanded=false):
  * translation and dubbing keep running in the background.
@@ -94,6 +100,7 @@ export function VoiceCaptions({
   onDubChange,
   dubToggleN,
   dubHighlight,
+  remoteDubs,
 }: {
   captions: Caption[];
   meUid: string;
@@ -107,6 +114,8 @@ export function VoiceCaptions({
   dubToggleN?: number;
   /** Briefly highlights the speaking box (the bar sent the user here). */
   dubHighlight?: boolean;
+  /** uid -> dub language of every peer whose dubbing is on right now. */
+  remoteDubs: Record<string, string>;
 }) {
   const t = useS();
   const { locale } = useI18n();
@@ -131,6 +140,11 @@ export function VoiceCaptions({
   const spokenRef = useRef(new Set<string>());
   const duckedRef = useRef(new Set<string>());
   const duckTimers = useRef(new Map<string, number>());
+  const remoteDubsRef = useRef(remoteDubs);
+  useEffect(() => {
+    remoteDubsRef.current = remoteDubs;
+  }, [remoteDubs]);
+  const prevDubsRef = useRef(remoteDubs);
   const listRef = useRef<HTMLDivElement | null>(null);
   const voiceOutRef = useRef(voiceOut);
   useEffect(() => {
@@ -167,7 +181,9 @@ export function VoiceCaptions({
       (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition
     );
 
-  /** Lowers a speaker's raw microphone while their dub line plays. */
+  /** Lowers a speaker's raw microphone while their dub line plays. A
+      speaker whose dubbing is ON stays ducked between lines too — the room
+      hears the translation, not the original voice. */
   const duckSpeaker = useCallback((uid: string, ms: number) => {
     setPVRef.current(uid, 0.06);
     const prev = duckTimers.current.get(uid);
@@ -176,10 +192,24 @@ export function VoiceCaptions({
       uid,
       window.setTimeout(() => {
         duckTimers.current.delete(uid);
-        setPVRef.current(uid, 1);
+        setPVRef.current(uid, duckRestoreVolume(!!remoteDubsRef.current[uid]));
       }, ms),
     );
   }, []);
+
+  /** Follow the signaled dubbing state: duck dubbing peers continuously and
+      hand their raw microphone back the moment they switch dubbing off. */
+  useEffect(() => {
+    for (const uid of Object.keys(remoteDubs)) {
+      if (uid === meUid) continue;
+      setPVRef.current(uid, 0.06);
+    }
+    const prev = prevDubsRef.current;
+    for (const uid of Object.keys(prev)) {
+      if (!(uid in remoteDubs) && uid !== meUid) setPVRef.current(uid, 1);
+    }
+    prevDubsRef.current = remoteDubs;
+  }, [remoteDubs, meUid]);
 
   const pushCaption = useCallback(
     (text: string) => {
@@ -194,11 +224,13 @@ export function VoiceCaptions({
       const spokenTag = findLang(srcLangRef.current)?.tag ?? localeTag;
       const out = voiceOutRef.current;
       if (out) {
-        // Speaker dubbing: translate, speak it here, share the translation.
+        // Speaker dubbing (broadcast): translate and SHARE the translation —
+        // the room hears it spoken on THEIR devices, the speaker keeps
+        // hearing their own real voice. No local TTS here (that was the old
+        // inverted behavior where only the speaker heard the dub).
         void (async () => {
           const tt = await translate(clean, out, "auto");
           const lang = findLang(out)?.tag ?? out;
-          if (tt) speakText(tt, lang);
           void send({
             type: "caption",
             text: clean,
@@ -310,18 +342,26 @@ export function VoiceCaptions({
   const targetTag = findLang(targetCode)?.tag ?? localeTag;
 
   // Translate new lines from other people into my chosen target language,
-  // duck their raw microphone while their dub plays, and (in voice mode)
-  // read the translated line aloud once.
+  // duck their raw microphone while their dub plays, and read translated
+  // lines aloud once. Lines that arrive pre-translated by a DUBBING speaker
+  // are a broadcast: they are always spoken, in the speaker's chosen language.
   useEffect(() => {
     for (const c of captions) {
       if (c.uid === meUid) continue;
       const isNew = !duckedRef.current.has(c.id);
       if (isNew) duckedRef.current.add(c.id);
-      // A speaker with dubbing on: their raw mic ducks while the dub plays.
-      if (isNew && c.tt) duckSpeaker(c.uid, 6000);
-      // A dub that already arrives in my language needs no request.
       const dubMatchesMe = !!c.tt && (findLang(c.tlang ?? "")?.code ?? "") === targetCode;
       const key = `${c.id}:${targetCode}`;
+      // Broadcast dubbing: the whole room hears the dub line, always.
+      if (isNew && isBroadcastDub(c)) {
+        duckSpeaker(c.uid, 8000);
+        if (!spokenRef.current.has(key)) {
+          spokenRef.current.add(key);
+          speakText(c.tt!, findLang(c.tlang ?? "")?.tag ?? localeTag);
+        }
+        if (dubMatchesMe) continue; // nothing else to fetch — tt is my language
+      }
+      // A dub that already arrives in my language needs no request.
       if (!dubMatchesMe) {
         const spoken = (c.lang.split("-")[0] || "").toLowerCase();
         if (spoken === targetCode) continue; // already my language
@@ -344,7 +384,7 @@ export function VoiceCaptions({
         speakText(c.tt!, targetTag);
       }
     }
-  }, [captions, targetCode, meUid, targetTag, duckSpeaker]);
+  }, [captions, targetCode, meUid, targetTag, duckSpeaker, localeTag]);
 
   // Keep the newest line in view.
   useEffect(() => {
@@ -352,7 +392,7 @@ export function VoiceCaptions({
   }, [captions.length, translated]);
 
   const selectCls =
-    "mt-1 h-9 w-full rounded-lg border border-cova-line bg-white px-2 text-xs font-medium";
+    "mt-1 h-9 w-full rounded-lg border border-blue-200 bg-white px-2 text-xs font-medium text-cova-ink focus:border-blue-500 focus:outline-none";
 
   // The panel can be closed — the hooks above keep translating and dubbing.
   if (!expanded) return null;
@@ -368,10 +408,10 @@ export function VoiceCaptions({
         <div className="grid gap-3 sm:grid-cols-2">
           {/* Listening: what I receive, and how. */}
           <section
-            className="space-y-2.5 rounded-xl border border-cova-line bg-cova-bg/50 p-3"
+            className="space-y-2.5 rounded-xl border border-blue-100 bg-blue-50/50 p-3"
             aria-label={t("cap.listenTitle")}
           >
-            <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cova-mute">
+            <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700">
               <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
               {t("cap.listenTitle")}
             </h4>
@@ -403,7 +443,9 @@ export function VoiceCaptions({
                   onClick={() => setAutoDub(m)}
                   className={cn(
                     "flex flex-1 items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium transition-colors",
-                    autoDub === m ? "bg-cova-ink text-white" : "bg-white hover:bg-cova-bg",
+                    autoDub === m
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-blue-800 hover:bg-blue-50",
                   )}
                 >
                   {m === "voice" ? <Volume2 className="h-3.5 w-3.5" aria-hidden="true" /> : null}
@@ -419,11 +461,11 @@ export function VoiceCaptions({
               "space-y-2.5 rounded-xl border p-3 transition-colors",
               dubHighlight
                 ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300"
-                : "border-cova-line bg-cova-bg/50",
+                : "border-blue-100 bg-blue-50/50",
             )}
             aria-label={t("cap.speakTitle")}
           >
-            <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cova-mute">
+            <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700">
               <Mic className="h-3.5 w-3.5" aria-hidden="true" />
               {t("cap.speakTitle")}
             </h4>
@@ -458,17 +500,20 @@ export function VoiceCaptions({
               </select>
             </label>
             {dubOn && (
-              <p
-                className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800"
+              <div
+                className="rounded-lg bg-blue-50 px-2.5 py-1.5 ring-1 ring-blue-200"
                 role="status"
                 data-testid="dub-on"
               >
-                <span>{t("cap.dubOn", { lang: findLang(voiceOut)?.label ?? voiceOut })}</span>
-                <span className="relative flex h-2 w-2" aria-hidden="true">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-              </p>
+                <p className="flex items-center justify-between gap-2 text-xs font-semibold text-blue-800">
+                  <span>{t("cap.dubOn", { lang: findLang(voiceOut)?.label ?? voiceOut })}</span>
+                  <span className="relative flex h-2 w-2" aria-hidden="true">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                  </span>
+                </p>
+                <p className="mt-0.5 text-[11px] leading-snug text-blue-700">{t("cap.dubDir")}</p>
+              </div>
             )}
             <Button
               size="sm"
@@ -526,17 +571,17 @@ export function VoiceCaptions({
               const speak = () => speakText(trans ?? c.text, mainLang);
 
               return (
-                <div key={c.id} className="rounded-lg bg-cova-bg px-2.5 py-2">
-                  <p className="flex items-center gap-1.5 text-[11px] text-cova-mute">
+                <div key={c.id} className="rounded-lg bg-blue-50/70 px-2.5 py-2 ring-1 ring-blue-100">
+                  <p className="flex items-center gap-1.5 text-[11px] text-blue-800">
                     <span className="truncate font-medium">{mine ? t("cap.you") : c.name}</span>
-                    <span className="shrink-0 rounded bg-cova-pale px-1 font-mono text-[10px]">
+                    <span className="shrink-0 rounded bg-blue-100 px-1 font-mono text-[10px] text-blue-700">
                       {shortLang(mainLang)}
                     </span>
                     <button
                       type="button"
                       onClick={speak}
                       aria-label={t("cap.listen")}
-                      className="ms-auto rounded p-0.5 hover:bg-cova-pale"
+                      className="ms-auto rounded p-0.5 hover:bg-blue-100"
                     >
                       <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>

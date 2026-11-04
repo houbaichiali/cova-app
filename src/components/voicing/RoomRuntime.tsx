@@ -75,6 +75,10 @@ interface RoomRuntimeValue {
   screenStream: MediaStream | null;
   /** uid -> MediaStream of a room-mate's live shared screen. */
   remoteVideos: Record<string, MediaStream>;
+  /** uid -> true for every peer whose client SIGNALS an active screen share. */
+  remoteShares: Record<string, boolean>;
+  /** uid -> dub language for every peer whose dubbing is on (broadcast). */
+  remoteDubs: Record<string, string>;
   /** Camera (mine + the room's), separate from screen sharing. */
   camOn: boolean;
   camStream: MediaStream | null;
@@ -151,6 +155,8 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
     shareNotice,
     screenStream,
     remoteVideos,
+    remoteShares,
+    remoteDubs,
     camOn,
     camStream,
     camFacing,
@@ -236,6 +242,8 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
       shareNotice,
       screenStream,
       remoteVideos,
+      remoteShares,
+      remoteDubs,
       camOn,
       camStream,
       camFacing,
@@ -267,6 +275,8 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
       shareNotice,
       screenStream,
       remoteVideos,
+      remoteShares,
+      remoteDubs,
       camOn,
       camStream,
       camFacing,
