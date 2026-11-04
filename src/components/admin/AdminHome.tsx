@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
+import { AdminStats } from "@/components/admin/AdminStats";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -42,6 +43,8 @@ export function AdminHome() {
           <Button variant="secondary">{t("admin.nav.backToStudent")}</Button>
         </Link>
       </div>
+
+      <AdminStats />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

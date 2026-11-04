@@ -3,7 +3,8 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, LayoutDashboard, Menu, X } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Menu, Users, X } from "lucide-react";
+import { useAdminAccess } from "@/lib/admin-client";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
@@ -11,16 +12,22 @@ interface AdminNavItem {
   href: string;
   labelKey: Parameters<ReturnType<typeof useT>>[0];
   icon: typeof LayoutDashboard;
+  /** Permission required to see the entry (dashboard itself: any admin). */
+  permission?: string;
 }
 
 /** Modules light up as their phases land — no placeholder entries. */
-const NAV_ITEMS: AdminNavItem[] = [{ href: "/admin", labelKey: "admin.nav.dashboard", icon: LayoutDashboard }];
+const NAV_ITEMS: AdminNavItem[] = [
+  { href: "/admin", labelKey: "admin.nav.dashboard", icon: LayoutDashboard },
+  { href: "/admin/users", labelKey: "admin.nav.users", icon: Users, permission: "users.read" },
+];
 
 /** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents. */
 export function AdminShell({ children }: { children: ReactNode }) {
   const t = useT();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const access = useAdminAccess();
 
   return (
     <div className="min-h-screen bg-cova-bg">
@@ -56,7 +63,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {NAV_ITEMS.map(({ href, labelKey, icon: Icon }) => {
+          {NAV_ITEMS.map(({ href, labelKey, icon: Icon, permission }) => {
+            if (permission && !access.can(permission)) return null;
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link
