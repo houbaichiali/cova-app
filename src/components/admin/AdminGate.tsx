@@ -31,6 +31,16 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
     setRawError(null);
     try {
       const supabase = getSupabase();
+      // Clean up leftovers from interrupted enrollments: an unverified factor
+      // blocks a new one with the same friendly name. Verified factors are
+      // never touched.
+      const { data: existing } = await supabase.auth.mfa.listFactors();
+      for (const factor of existing?.all ?? []) {
+        if (factor.factor_type === "totp" && factor.status !== "verified") {
+          const { error: unenrollError } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+          if (unenrollError) throw unenrollError;
+        }
+      }
       const { data, error } = await supabase.auth.mfa.enroll({
         factorType: "totp",
         friendlyName: "COVA Admin",
@@ -47,7 +57,7 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
       setChallengeId(challenge.id);
     } catch (e) {
       setError(t("admin.mfa.error"));
-      // Surface the real reason (e.g. "MFA is disabled for this project").
+      // Surface the real reason (e.g. a duplicate factor that could not be cleaned).
       setRawError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
