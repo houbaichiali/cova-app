@@ -227,10 +227,15 @@ export function VoiceRoom({ code }: { code: string }) {
             joinedAt: m.joinedAt,
           }))}
         />
-        {/* Floating camera tiles over the stage (mine + everyone else's). */}
+        {/* Floating camera tiles over the stage (mine + everyone else's).
+            Remote tiles render only for peers whose client signaled a live
+            camera — the WebRTC m-line itself also carries a placeholder, so
+            the ctl "cam" signal is what makes a tile real. */}
         <CameraStrip
           members={membersName}
-          remoteCams={runtime.remoteCams}
+          remoteCams={Object.fromEntries(
+            Object.entries(runtime.remoteCams).filter(([uid]) => runtime.remoteCamFacing[uid]),
+          )}
           remoteCamFacing={runtime.remoteCamFacing}
           myCam={runtime.camStream}
           camFacing={runtime.camFacing}

@@ -55,6 +55,8 @@ const ICE: RTCConfiguration = {
 
 interface Peer {
   pc: RTCPeerConnection;
+  /** Set when the owning hook unmounted — async offer work must stop. */
+  closed: boolean;
   /** Hidden <audio> pinned to the DOM so mobile browsers will play it. */
   audio: HTMLAudioElement;
   /** Pre-created sendrecv senders: late mic / screen tracks reuse them. */
@@ -206,6 +208,59 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     data: Uint8Array<ArrayBuffer>;
     level: number;
   } | null>(null);
+
+  /**
+   * Shared placeholder tracks (mute oscillator audio + 2x2 black canvas
+   * video). They are attached to every peer's pre-created transceivers the
+   * moment the connection exists, so the FIRST offer/answer is sendrecv on
+   * every m-line. Without them a m-line answered before the real track
+   * existed narrows to recvonly — and a later replaceTrack() never re-opens
+   * it, which permanently killed a late mic / screen / camera for that peer.
+   * With placeholders, swapping in the real track is instantaneous and needs
+   * no renegotiation at all.
+   */
+  const silence = useRef<{ audio?: MediaStreamTrack; video?: MediaStreamTrack; video2?: MediaStreamTrack }>({});
+  const getSilence = useCallback((): {
+    audio?: MediaStreamTrack;
+    video?: MediaStreamTrack;
+    video2?: MediaStreamTrack;
+  } => {
+    const ac = ctx.current;
+    if (!ac) return silence.current;
+    if (!silence.current.audio) {
+      try {
+        const dst = ac.createMediaStreamDestination();
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(dst);
+        osc.start();
+        silence.current.audio = dst.stream.getAudioTracks()[0] ?? undefined;
+        const canvas = document.createElement("canvas");
+        canvas.width = 2;
+        canvas.height = 2;
+        const g = canvas.getContext("2d");
+        if (g) {
+          g.fillStyle = "#000";
+          g.fillRect(0, 0, 2, 2);
+        }
+        silence.current.video = canvas.captureStream(1).getVideoTracks()[0] ?? undefined;
+        const canvas2 = document.createElement("canvas");
+        canvas2.width = 2;
+        canvas2.height = 2;
+        const g2 = canvas2.getContext("2d");
+        if (g2) {
+          g2.fillStyle = "#000";
+          g2.fillRect(0, 0, 2, 2);
+        }
+        silence.current.video2 = canvas2.captureStream(1).getVideoTracks()[0] ?? undefined;
+      } catch {
+        /* placeholders are best-effort */
+      }
+    }
+    return silence.current;
+  }, []);
 
   const getLevel = useCallback((uid: string): number => {
     if (uid === meRef.current) {
@@ -532,12 +587,17 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       audio.style.display = "none";
       document.body.appendChild(audio);
 
+      const silence = getSilence();
+
       const peer: Peer = {
         pc,
         audio,
-        audioTransceiver: pc.addTransceiver("audio", { direction: "sendrecv" }),
-        videoTransceiver: pc.addTransceiver("video", { direction: "sendrecv" }),
-        camTransceiver: pc.addTransceiver("video", { direction: "sendrecv" }),
+        // Filled by whichever side this is: the offerer captures its own
+        // addTransceiver() transceivers, the answerer captures the ones
+        // addTrack() re-uses when it fills the offer's m-lines.
+        audioTransceiver: null as unknown as RTCRtpTransceiver,
+        videoTransceiver: null as unknown as RTCRtpTransceiver,
+        camTransceiver: null as unknown as RTCRtpTransceiver,
         ctl: null,
         analyser: null,
         pendingIce: [],
@@ -547,29 +607,56 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         baseVolume: 1,
         level: 0,
         data: new Uint8Array(new ArrayBuffer(512)),
+        closed: false,
       };
       peers.current.set(uid, peer);
       applyVolume(peer);
 
-      // Perfect negotiation: the peer with the larger uid is polite.
-      const polite = meRef.current > uid;
-      const sendDescription = (d: RTCSessionDescriptionInit) =>
-        sendRef.current(uid, { kind: "sdp", description: d });
-
-      pc.onnegotiationneeded = () => {
+      /* ---------------- DETERMINISTIC NEGOTIATION ----------------
+       * Exactly ONE round, driven by the peer with the LARGER uid:
+       *  - offerer: builds audio/screen/camera m-lines up front with
+       *    placeholder senders, offers once, and later swaps real tracks in
+       *    with replaceTrack() (instant, no renegotiation).
+       *  - answerer: applies the offer, then fills the same three m-lines
+       *    with addTrack(track, stream) — the ONLY attachment Chrome honours
+       *    when composing an answer — and answers once.
+       * Perfect negotiation (both sides offering + rollback) deadlocked real
+       * browsers here: colliding offers threw "the order of m-lines doesn't
+       * match", nobody ever answered and the room sat in silence. */
+      const isOfferer = meRef.current > uid;
+      if (isOfferer) {
+        peer.audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+        peer.videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+        peer.camTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+        // Placeholder senders (mute audio / black video): the offer is
+        // sendrecv on every m-line, so a real track attached later is an
+        // instant replaceTrack() with no renegotiation whatsoever.
+        try {
+          if (silence.audio) void peer.audioTransceiver.sender.replaceTrack(silence.audio);
+          if (silence.video) {
+            void peer.videoTransceiver.sender.replaceTrack(silence.video);
+            void peer.camTransceiver.sender.replaceTrack(silence.video);
+          }
+        } catch {
+          /* peer closing */
+        }
+        // Only the offerer's data channel is negotiated; the answerer picks
+        // it up through ondatachannel.
+        wireCtl(pc.createDataChannel("cova-ctl"), uid);
         const work = async () => {
           try {
-            peer.makingOffer = true;
-            await pc.setLocalDescription();
-            if (pc.localDescription) sendDescription(pc.localDescription);
-          } catch {
-            /* negotiation can fail if the peer vanished */
-          } finally {
-            peer.makingOffer = false;
+            const offer = await pc.createOffer();
+            if (peer.closed) return;
+            await pc.setLocalDescription(offer);
+            if (pc.localDescription && !peer.closed)
+              sendRef.current(uid, { kind: "sdp", description: pc.localDescription });
+          } catch (e) {
+            if (!peer.closed) console.error("[MESH-ERR] offer failed", (e as Error)?.message ?? e);
           }
         };
         void work();
-      };
+      }
+      pc.ondatachannel = (event) => wireCtl(event.channel, uid);
 
       pc.onicecandidate = (e) => {
         if (e.candidate) sendRef.current(uid, { kind: "ice", candidate: e.candidate.toJSON() });
@@ -591,9 +678,10 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
           }
           return;
         }
-        // Two video m-lines exist: the first carries a shared screen, the
-        // second a camera. The transceiver object is the unambiguous label.
-        if (e.transceiver === peer.camTransceiver) {
+        // Two video m-lines exist: m-line 1 carries a shared screen, m-line 2
+        // a camera. The offer/answer order fixes the mapping for both roles,
+        // and `mid` is the stable label (transceiver objects differ per side).
+        if (e.transceiver.mid === "2") {
           addCam(uid, remote);
           track.onended = () => dropCam(uid);
           track.onmute = () => dropCam(uid);
@@ -616,14 +704,12 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         }
       };
 
-      // Exactly one control channel per pair: the impolite side creates it,
-      // the polite side picks it up. It rides in the first SDP either way.
-      if (!polite) wireCtl(pc.createDataChannel("cova-ctl"), uid);
-      pc.ondatachannel = (event) => wireCtl(event.channel, uid);
+      // BOTH sides create the control channel is NOT needed: the offerer's
+      // application m-line carries it and the answerer receives it above.
 
       return peer;
     },
-    [addVideo, applyVolume, dropVideo, wireCtl],
+    [addVideo, applyVolume, dropVideo, wireCtl, getSilence],
   );
 
   /* --------------------- microphone (with retry) --------------------- */
@@ -654,14 +740,15 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       };
       const track = s.getAudioTracks()[0] ?? null;
       peers.current.forEach((p) => {
-        // addTrack reuses the pre-created sendrecv audio transceiver — no new
-        // m-line, and perfect negotiation fixes the direction even if needed.
-        if (track && !p.pc.getSenders().some((snd) => snd.track === track))
-          try {
-            p.pc.addTrack(track, s);
-          } catch {
-            /* peer closing */
-          }
+        // Ride the pre-created sendrecv audio transceiver (it carries a mute
+        // placeholder until now, so this swap needs no renegotiation and the
+        // room hears this microphone the moment it exists).
+        try {
+          if (track && p.audioTransceiver.sender.track !== track)
+            void p.audioTransceiver.sender.replaceTrack(track);
+        } catch {
+          /* peer closing */
+        }
       });
       setMicError(false);
     };
@@ -701,11 +788,18 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       camTrackRef.current = null;
       if (cTrack) cTrack.stop();
       peerMap.forEach((p) => {
+        p.closed = true;
         p.pc.close();
         p.audio.srcObject = null;
         p.audio.remove();
       });
       peerMap.clear();
+      // The shared placeholder tracks (mute audio / black video) die with the
+      // room; a fresh session builds new ones.
+      silence.current.audio?.stop();
+      silence.current.video?.stop();
+      silence.current.video2?.stop();
+      silence.current = {};
       void ac.close().catch(() => undefined);
       if (ctx.current === ac) ctx.current = null;
       setSharing(false);
@@ -737,12 +831,14 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     want.forEach((uid) => {
       ensurePeer(uid);
       const p = peers.current.get(uid);
-      // Existing members already receive my mic/screen through addTrack above.
+      // A fresh peer immediately receives my live mic / screen / camera on
+      // the pre-created transceivers — instant swaps over the placeholders.
       if (stream.current) {
         const track = stream.current.getAudioTracks()[0];
-        if (track && p && !p.pc.getSenders().some((snd) => snd.track === track)) {
+        if (track && p) {
           try {
-            p.pc.addTrack(track, stream.current);
+            if (p.audioTransceiver.sender.track !== track)
+              void p.audioTransceiver.sender.replaceTrack(track);
           } catch {
             /* peer closing */
           }
@@ -801,36 +897,52 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       try {
         if (msg.kind === "sdp") {
           const description = msg.description;
-          const readyForOffer =
-            !p.makingOffer &&
-            (p.pc.signalingState === "stable" || p.settingRemoteAnswerPending);
-          const offerCollision = description.type === "offer" && !readyForOffer;
-          const polite = meRef.current > from;
-          p.ignoreOffer = !polite && offerCollision;
-          if (p.ignoreOffer) return;
-          const answering = description.type === "answer";
-          p.settingRemoteAnswerPending = answering;
-          try {
+          if (description.type === "offer") {
+            // I am the answerer. Only a stable PC can take the (single) offer;
+            // anything else is a stale duplicate from an earlier round.
+            if (p.pc.signalingState !== "stable") return;
             await p.pc.setRemoteDescription(description);
             for (const c of p.pendingIce.splice(0)) await p.pc.addIceCandidate(c);
-            if (description.type === "offer") {
-              await p.pc.setLocalDescription();
-              if (p.pc.localDescription)
-                sendRef.current(from, { kind: "sdp", description: p.pc.localDescription });
-            }
-          } finally {
-            p.settingRemoteAnswerPending = false;
+            // Fill the offered m-lines with my live tracks (or standby
+            // placeholders) via addTrack(track, stream) — the ONLY attachment
+            // Chrome honours when composing an answer (a replaceTrack before
+            // the first answer is ignored and the answer narrows to recvonly,
+            // which muted the answerer's mic forever). Order = m-line order:
+            // audio, screen, camera. Real tracks when they already exist so
+            // the answer carries my true state; otherwise the standby ones
+            // keep the m-line sendrecv and a later real swap is instant.
+            const sil = getSilence();
+            const a = stream.current?.getAudioTracks()[0] ?? sil.audio;
+            const s = screenTrack.current ?? sil.video;
+            const c = camTrackRef.current ?? sil.video2;
+            if (a) p.pc.addTrack(a, new MediaStream([a]));
+            if (s) p.pc.addTrack(s, new MediaStream([s]));
+            if (c) p.pc.addTrack(c, new MediaStream([c]));
+            // Capture the transceivers addTrack re-used (association order =
+            // the offer's m-line order: audio, screen, camera).
+            const ts = p.pc.getTransceivers().filter((t) => t.mid !== null);
+            if (ts[0]) p.audioTransceiver = ts[0];
+            if (ts[1]) p.videoTransceiver = ts[1];
+            if (ts[2]) p.camTransceiver = ts[2];
+            await p.pc.setLocalDescription();
+            if (p.pc.localDescription)
+              sendRef.current(from, { kind: "sdp", description: p.pc.localDescription });
+          } else {
+            // The answer to my one and only initial offer.
+            if (p.pc.signalingState !== "have-local-offer") return;
+            await p.pc.setRemoteDescription(description);
+            for (const c of p.pendingIce.splice(0)) await p.pc.addIceCandidate(c);
           }
         } else {
           if (p.pc.remoteDescription) await p.pc.addIceCandidate(msg.candidate);
           else p.pendingIce.push(msg.candidate);
         }
-      } catch {
-        /* stale signal for a closed connection */
+      } catch (e) {
+        console.error("[MESH-ERR]", (e as Error)?.message ?? e);
       }
     };
     return onSignal((s) => void handler(s));
-  }, [enabled, ensurePeer, onSignal]);
+  }, [enabled, ensurePeer, onSignal, getSilence]);
 
   /* ------------------------ screen sharing ------------------------ */
 
@@ -841,13 +953,14 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     sharingRef.current = false;
     if (track) track.stop();
     peers.current.forEach((p) => {
-      const sender = p.videoTransceiver.sender; // screen m-line only, not the camera
-      if (sender.track) {
-        try {
-          p.pc.removeTrack(sender); // remote track ends -> overlay disappears
-        } catch {
-          /* peer closing */
-        }
+      try {
+        // Stop SENDING the screen but keep the m-line (replaceTrack(null)):
+        // removeTrack() would demand a renegotiation round, and the m-line
+        // must stay for the next share anyway. The remote track mutes and
+        // the overlay disappears through its onmute handler.
+        p.videoTransceiver.sender.replaceTrack(null);
+      } catch {
+        /* peer closing */
       }
     });
     setSharing(false);
@@ -878,7 +991,9 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       setScreenStream(screen);
       peers.current.forEach((p) => {
         try {
-          // Explicit screen m-line: the camera has its own transceiver.
+          // Explicit screen m-line: the camera has its own transceiver. The
+          // m-line carries a black placeholder, so this swap is instant and
+          // needs no renegotiation.
           p.videoTransceiver.sender.replaceTrack(track);
         } catch {
           /* peer closing */

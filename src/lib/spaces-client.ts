@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { demoActions, useDemoState } from "@/lib/demo-store";
 import { useMe } from "@/lib/social-store";
+import { currentUser as demoCurrentUser } from "@/data/students";
 import type { Member, MyStatus, SpaceKind, SpaceSummary, SpaceView } from "@/server/spaces-store";
 
 export type { Member, MyStatus, SpaceKind, SpaceSummary, SpaceView };
@@ -32,18 +33,24 @@ function readGuestUid(): string {
 
 export function useIdentity(): { uid: string; name: string; signedIn: boolean; ready: boolean } {
   const { session, settings } = useDemoState();
-  const me = useMe(); // real signed-in profile from the social store (null while loading/guest)
+  const me = useMe(); // signed-in profile from the social store (null while loading/guest)
+  // The social store falls back to a DEMO persona (fixed id "me") whenever
+  // nobody is signed in. That persona must never become a room identity:
+  // every guest would carry the same "u-me" id, the server would merge the
+  // whole room into ONE member and nobody could ever hear or see anybody.
+  const realMe = me && me.id !== demoCurrentUser.id ? me : null;
   const guest = useSyncExternalStore(
     () => () => {},
     readGuestUid,
     () => "",
   );
-  // The real account wins: same uuid in every tab, same display name as the profile.
-  // Fallbacks keep guests working and cover stale demo settings saved earlier.
-  const uid = me ? `u-${me.id}` : session ? `u-${session.email.toLowerCase()}` : guest;
+  // The real account wins: same uuid in every tab, same display name as the
+  // profile. Guests keep their per-browser random id, so two devices are two
+  // people. Fallbacks cover stale demo settings saved earlier.
+  const uid = realMe ? `u-${realMe.id}` : session ? `u-${session.email.toLowerCase()}` : guest;
   const name =
-    me?.displayName || session?.name || settings.displayName || me?.id?.slice(0, 8) || "Guest";
-  return { uid, name, signedIn: !!me || !!session, ready: !!uid };
+    realMe?.displayName || session?.name || settings.displayName || "Guest";
+  return { uid, name, signedIn: !!realMe || !!session, ready: !!uid };
 }
 
 export async function api<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {

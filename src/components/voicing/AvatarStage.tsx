@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { getAvatar, type AvatarDef } from "@/components/voicing/avatars";
@@ -55,6 +55,8 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
   const syncRef = useRef<(() => void) | null>(null);
   const meRef = useRef(meUid);
   const bubblesRef = useRef(bubbles);
+  /** WebGL unavailable or lost -> paint a flat 2D stage, NEVER crash the room. */
+  const [glBroken, setGlBroken] = useState(false);
 
   useEffect(() => {
     membersRef.current = members;
@@ -69,7 +71,28 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
     const labels = labelsRef.current;
     if (!host || !labels) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // WebGL can be unavailable (hardware acceleration off, driver trouble,
+    // the browser's ~16 live contexts cap after navigating between rooms) —
+    // a throw here used to unmount the WHOLE room into the error boundary,
+    // killing audio, camera, share and control with it. Now the stage merely
+    // degrades to a flat 2D view and the room keeps working.
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      setGlBroken(true);
+      return;
+    }
+    let contextLost = false;
+    renderer.domElement.addEventListener(
+      "webglcontextlost",
+      (e) => {
+        e.preventDefault();
+        contextLost = true;
+        setGlBroken(true); // swap to the 2D stage instead of erroring per frame
+      },
+      false,
+    );
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
@@ -247,6 +270,7 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     function frame() {
+      if (contextLost) return; // the 2D fallback took over
       raf = requestAnimationFrame(frame);
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime;
@@ -337,14 +361,100 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
         a.ringMat.dispose();
       }
       ringGeo.dispose();
+      // Free EVERY GPU resource this stage created (three only drops the
+      // context for real when the canvas is force-lost), otherwise repeated
+      // room visits leak WebGL contexts until the browser refuses new ones.
+      scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        mesh.geometry?.dispose?.();
+        const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat?.dispose?.();
+      });
+      try {
+        renderer.forceContextLoss();
+      } catch {
+        /* already lost */
+      }
       renderer.dispose();
       renderer.domElement.remove();
     };
   }, []);
 
+  // Flat 2D stage: same members, order and flags, no GPU anywhere. The room's
+  // audio/camera/share/control are untouched by a dead WebGL context.
+  if (glBroken) {
+    const list = [...members].sort(
+      (a, b) => a.joinedAt - b.joinedAt || a.uid.localeCompare(b.uid),
+    );
+    return (
+      <div
+        className={`flex flex-wrap content-center items-center justify-center gap-5 ${className ?? ""}`}
+        data-testid="stage-2d"
+      >
+        {list.map((m) => (
+          <FlatMember key={m.uid} m={m} isMe={m.uid === meUid} bubbles={bubbles} getLevel={getLevel} />
+        ))}
+        {list.length === 0 && (
+          <p className="text-sm text-cova-muted">…</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div ref={hostRef} className={`relative overflow-hidden ${className ?? ""}`}>
       <div ref={labelsRef} className="pointer-events-none absolute inset-0" />
+    </div>
+  );
+}
+
+/** One member of the 2D fallback stage: initial ring + name + live speaking pulse. */
+function FlatMember({
+  m,
+  isMe,
+  bubbles,
+  getLevel,
+}: {
+  m: StageMember;
+  isMe: boolean;
+  bubbles?: Record<string, string>;
+  getLevel: (uid: string) => number;
+}) {
+  const def = getAvatar(m.avatar);
+  const accentCss = `#${def.accent.toString(16).padStart(6, "0")}`;
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setLevel(getLevel(m.uid)), 120);
+    return () => window.clearInterval(id);
+  }, [m.uid, getLevel]);
+  const speaking = level > 0.08;
+  const crown = m.role === "owner" ? "👑 " : m.role === "mod" ? "🛡 " : "";
+  const flags = `${m.muted ? " 🔇" : ""}${m.deafened ? " 🙉" : ""}`;
+  return (
+    <div className="flex w-24 flex-col items-center gap-1.5">
+      <div
+        className="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white shadow-lg transition-transform"
+        style={{
+          backgroundColor: accentCss,
+          boxShadow: speaking ? `0 0 0 ${3 + Math.round(level * 5)}px ${accentCss}55` : undefined,
+          transform: speaking ? `scale(${1 + level * 0.08})` : undefined,
+        }}
+        aria-hidden="true"
+      >
+        {m.name.trim().charAt(0).toUpperCase() || "?"}
+      </div>
+      <p className="max-w-24 truncate rounded-full bg-white/85 px-2 py-0.5 text-[11px] font-medium text-cova-ink shadow-sm">
+        {crown}
+        {m.name}
+        {isMe ? " •" : ""}
+        {flags}
+      </p>
+      {bubbles?.[m.uid] && (
+        <p className="max-w-28 rounded-xl bg-cova-ink/90 px-2 py-1 text-center text-[11px] leading-snug text-white shadow-md">
+          {bubbles[m.uid]}
+        </p>
+      )}
     </div>
   );
 }

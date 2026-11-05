@@ -153,9 +153,11 @@ ok(meshSrc.includes("String(Math.floor(100000 + Math.random() * 900000))"),
 
 /* ---------------- 3d. camera wiring (source guard) ---------------- */
 console.log("3d) Camera wiring");
-ok(meshSrc.includes("camTransceiver: pc.addTransceiver("), "a dedicated camera m-line exists per peer");
-ok(meshSrc.includes("e.transceiver === peer.camTransceiver"),
-  "receiver tells camera video apart from screen video by transceiver");
+ok(
+  (meshSrc.match(/addTransceiver\("video"/g) ?? []).length >= 2,
+  "a dedicated camera m-line exists per peer (screen + camera video lines)");
+ok(meshSrc.includes('e.transceiver.mid === "2"'),
+  "receiver tells camera video apart from screen video by m-line mid");
 ok(meshSrc.includes("p.videoTransceiver.sender.replaceTrack(track)"),
   "screen share rides the screen m-line only");
 ok(meshSrc.includes("p.camTransceiver.sender.replaceTrack(track)"),
