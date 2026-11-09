@@ -215,6 +215,27 @@ reset role;
 select t.check('gamif: badge+xp actions audited', $$select count(*) from public.admin_audit_logs where action like 'gamification.%' having count(*)>=4$$, 'rows=1');
 set role authenticated;
 
+-- ============================================================================
+-- PHASE: analytics
+-- ============================================================================
+-- bob (admin: analytics.read)
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('analytics: admin gets summary', $$select public.admin_analytics_summary(30)$$, 'ok');
+select t.check('analytics: users total present', $$select 1 from (select (public.admin_analytics_summary(30)->'users'->>'total')::int as n) x where n >= 4$$, 'rows=1');
+select t.check('analytics: series has 30 day buckets', $$select jsonb_array_length(public.admin_analytics_summary(30)->'series'->'xp')$$, 'rows=1');
+select t.keep('ser_len', $$select jsonb_array_length(public.admin_analytics_summary(30)->'series'->'xp')$$);
+select t.check('analytics: 30 buckets', $$select 1 where t.get('ser_len')::int between 30 and 31$$, 'rows=1');
+select t.check('analytics: 7-day period works', $$select jsonb_array_length(public.admin_analytics_summary(7)->'series'->'xp')$$, 'rows=1');
+select t.check('analytics: bad period refused', $$select public.admin_analytics_summary(13)$$, 'error');
+
+-- erin (student): denied. frank (analyst): CAN read (analytics.read is the
+-- analyst role's documented purpose, seeded in admin_foundation) but cannot write.
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('analytics: student denied', $$select public.admin_analytics_summary(30)$$, 'error');
+select t.as_user('00000000-0000-0000-0000-00000000000f');
+select t.check('analytics: analyst (read-only role) reads', $$select public.admin_analytics_summary(7)$$, 'ok');
+select t.check('analytics: analyst still cannot adjust xp', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000e'::uuid, 50, 'test reason again', 'abc124')$$, 'error');
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%';
