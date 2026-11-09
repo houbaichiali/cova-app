@@ -118,3 +118,17 @@ alter table public.profiles
 -- profiles.xp: the gamification counter. Referenced by gamification/quiz/XP
 -- migrations but created by none of them (live database only).
 alter table public.profiles add column if not exists xp integer not null default 0;
+
+-- The live database grants SELECT on courses to authenticated users (its RLS
+-- lives in the live schema). Without this grant, ANY policy whose subquery
+-- scans courses (assignment submissions, lesson files, ...) fails with
+-- "permission denied for table courses" even when the OR-branch would
+-- short-circuit: PostgreSQL checks ACLs for every range-table entry at
+-- executor startup. Mirror the live behaviour so storage/RLS policies and
+-- the app's with-check subqueries can be exercised by the suites.
+grant select on public.courses             to authenticated;
+grant select on public.course_lessons      to authenticated;
+grant select on public.course_enrollments  to authenticated;
+grant select on public.lesson_completions  to authenticated;
+grant select on public.spaces              to authenticated;
+grant select on public.space_members       to authenticated;
