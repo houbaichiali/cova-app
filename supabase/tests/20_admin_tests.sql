@@ -94,6 +94,66 @@ select t.check('rules: analyst can read versions', $$select * from public.admin_
 select t.check('rules: analyst cannot edit', $$select public.admin_rule_update(t.get('rule_id')::uuid,'x','d','general','low','',null,'')$$, 'error');
 select t.check('rules: analyst cannot create', $$select public.admin_rule_create('T','d','general','low')$$, 'error');
 
+-- ============================================================================
+-- PHASE: content quality review
+-- ============================================================================
+reset role; -- setup below runs as the DB owner (RLS does not apply to it)
+
+-- a quiz authored by carol + a resource uploaded by erin to review
+insert into public.quizzes (id, created_by, title, category, questions)
+values ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-00000000000c', 'Cells basics', 'Science', '[]'::jsonb);
+insert into public.shared_resources (title, type, category, minutes, file_name, mime_type, file_size, storage_path, uploaded_by)
+values ('Algebra sheet', 'Cheatsheet', 'Mathematics', 5, 'alg.pdf', 'application/pdf', 1024,
+        '00000000-0000-0000-0000-00000000000e/alg.pdf', '00000000-0000-0000-0000-00000000000e');
+
+-- grant content_manager role to carol as well (moderator+content_manager)
+insert into public.user_admin_roles (user_id, role_key, granted_by)
+values ('00000000-0000-0000-0000-00000000000c', 'content_manager', '00000000-0000-0000-0000-00000000000b')
+on conflict do nothing;
+
+set role authenticated;
+
+-- erin (plain student): nothing allowed
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('content: student cannot browse', $$select * from public.admin_content_browse('quiz')$$, 'error');
+select t.check('content: student cannot enqueue', $$select public.admin_content_enqueue('quiz','11111111-1111-1111-1111-111111111111')$$, 'error');
+select t.check('content: student cannot decide', $$select public.admin_content_decide(gen_random_uuid(),'approve','')$$, 'error');
+
+-- analyst: read-only role, must not decide
+select t.as_user('00000000-0000-0000-0000-00000000000f');
+select t.check('content: analyst cannot enqueue', $$select public.admin_content_enqueue('quiz','11111111-1111-1111-1111-111111111111')$$, 'error');
+select t.check('content: analyst cannot browse', $$select * from public.admin_content_browse('quiz')$$, 'error');
+
+-- carol (content_manager): full review workflow
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('content: manager browses quizzes', $$select 1 from public.admin_content_browse('quiz') where content_id='11111111-1111-1111-1111-111111111111'$$, 'rows=1');
+select t.keep('quiz_review', $$select public.admin_content_enqueue('quiz','11111111-1111-1111-1111-111111111111')$$);
+select t.keep('res_review',  $$select public.admin_content_enqueue('resource',(select id from public.shared_resources where title='Algebra sheet'))$$);
+select t.check('content: double enqueue refused', $$select public.admin_content_enqueue('quiz','11111111-1111-1111-1111-111111111111')$$, 'error');
+select t.check('content: assign to self', $$select public.admin_content_assign(t.get('quiz_review')::uuid)$$, 'ok');
+select t.check('content: request correction (no content change)', $$select public.admin_content_decide(t.get('quiz_review')::uuid,'request_correction','Add diagrams')$$, 'ok');
+select t.check('content: quiz untouched by correction', $$select 1 from public.quizzes where id='11111111-1111-1111-1111-111111111111' and visibility='public' and questions='[]'::jsonb$$, 'rows=1');
+select t.check('content: hide quiz -> private', $$select public.admin_content_decide(t.get('quiz_review')::uuid,'hide','Wrong answer in Q2')$$, 'ok');
+select t.check('content: quiz visibility now private', $$select 1 from public.quizzes where id='11111111-1111-1111-1111-111111111111' and visibility='private'$$, 'rows=1');
+select t.check('content: unhide restores public', $$select public.admin_content_decide(t.get('quiz_review')::uuid,'unhide','')$$, 'ok');
+select t.check('content: remove resource', $$select public.admin_content_decide(t.get('res_review')::uuid,'remove','Copyright issue')$$, 'ok');
+select t.check('content: resource hidden flag set', $$select 1 from public.shared_resources where title='Algebra sheet' and hidden$$, 'rows=1');
+select t.check('content: queue shows both reviews', $$select count(*) from public.admin_content_queue('','') having count(*)=2$$, 'rows=1');
+select t.check('content: queue filter by status', $$select 1 from public.admin_content_queue('','removed') where content_type='resource'$$, 'rows=1');
+select t.check('content: unknown action refused', $$select public.admin_content_decide(t.get('res_review')::uuid,'delete','')$$, 'error');
+
+-- student still reads their own hidden resource, but others do not
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('content: owner still sees own hidden resource', $$select 1 from public.shared_resources where title='Algebra sheet'$$, 'rows=1');
+-- a different student (bob) must NOT see it
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('content: other student cannot see hidden resource (admin sees own)', $$select 1 from public.shared_resources where title='Algebra sheet' and not hidden$$, 'rows=0');
+
+-- audit trail
+reset role;
+select t.check('content: decisions audited', $$select count(*) from public.admin_audit_logs where action like 'content.%' having count(*)>=7$$, 'rows=1');
+set role authenticated;
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%';
