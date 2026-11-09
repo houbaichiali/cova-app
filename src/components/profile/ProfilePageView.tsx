@@ -26,7 +26,6 @@ import { useT } from "@/i18n/client";
 import { levelForXp } from "@/lib/level-curve";
 import {
   ALIGN_CLASS,
-  BORDER_CLASS,
   COVER_PRESET_CLASS,
   FONT_STACKS,
   WEIGHT_CLASS,
