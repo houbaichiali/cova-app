@@ -86,9 +86,13 @@ export function TextAreaField({ id, label, error, hint, className, ...rest }: Te
   );
 }
 
+type SelectOption = string | { value: string; label: string };
+
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label: string;
-  options: string[];
+  /** A plain string renders as both value and label; an object allows a
+   * translated label different from the stored value. */
+  options: SelectOption[];
 }
 
 /** Compact labelled select used for filters. */
@@ -107,11 +111,15 @@ export function SelectFilter({ label, options, className, id, ...rest }: SelectP
         )}
         {...rest}
       >
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
+        {options.map((o) => {
+          const value = typeof o === "string" ? o : o.value;
+          const text = typeof o === "string" ? o : o.label;
+          return (
+            <option key={value} value={value}>
+              {text}
+            </option>
+          );
+        })}
       </select>
     </div>
   );

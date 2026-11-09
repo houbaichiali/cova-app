@@ -37,4 +37,5 @@ for f in migrations/*.sql; do
 done
 echo "-- all migrations applied"
 
-psql -d "$DB" -v ON_ERROR_STOP=1 -f tests/10_rls_tests.sql 2>&1 | tail -4
+psql -d "$DB" -v ON_ERROR_STOP=1 -f tests/10_rls_tests.sql 2>&1 | tail -3
+psql -d "$DB" -v ON_ERROR_STOP=1 -f tests/20_admin_tests.sql 2>&1 | tail -3

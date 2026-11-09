@@ -5,7 +5,8 @@ interface SearchInputProps {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
-  label: string;
+  /** Visually-hidden accessible name; a placeholder alone is not enough. */
+  label?: string;
   className?: string;
 }
 
