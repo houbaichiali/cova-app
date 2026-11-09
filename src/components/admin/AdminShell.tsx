@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, BookOpenCheck, LayoutDashboard, Menu, ScrollText, ShieldAlert, Users, X } from "lucide-react";
+import { ArrowLeft, BookOpenCheck, LayoutDashboard, Menu, ScrollText, ShieldAlert, Trophy, Users, X } from "lucide-react";
 import { useAdminAccess } from "@/lib/admin-client";
 import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ const NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/moderation", labelKey: "admin.nav.moderation", icon: ShieldAlert, permission: "moderation.reports.read" },
   { href: "/admin/rules", labelKey: "admin.nav.rules", icon: ScrollText, permission: "rules.read" },
   { href: "/admin/content", labelKey: "admin.nav.content", icon: BookOpenCheck, permission: "content.review" },
+  { href: "/admin/gamification", labelKey: "admin.nav.gamification", icon: Trophy, permission: "gamification.badges.manage" },
 ];
 
 /** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents. */

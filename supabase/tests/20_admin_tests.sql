@@ -154,6 +154,67 @@ reset role;
 select t.check('content: decisions audited', $$select count(*) from public.admin_audit_logs where action like 'content.%' having count(*)>=7$$, 'rows=1');
 set role authenticated;
 
+-- ============================================================================
+-- PHASE: badge & XP management
+-- ============================================================================
+-- grant carol the badges.manage + xp.adjust permissions via content_manager? No:
+-- content_manager lacks them. Grant bob a second role is admin (has all but
+-- users.delete/team.manage). Erin stays the denial persona.
+set role authenticated;
+
+-- erin (student): nothing
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('gamif: student cannot list badges', $$select * from public.admin_badges_list()$$, 'error');
+select t.check('gamif: student cannot adjust xp', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000e'::uuid, 50, 'test reason', 'abc123')$$, 'error');
+select t.check('gamif: student cannot read xp history', $$select * from public.admin_xp_history()$$, 'error');
+
+-- analyst: read-only, no gamification permissions
+select t.as_user('00000000-0000-0000-0000-00000000000f');
+select t.check('gamif: analyst cannot create badge', $$select public.admin_badge_save('test-badge','Test','')$$, 'error');
+select t.check('gamif: analyst cannot adjust xp', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000e'::uuid, 50, 'test reason', 'abc124')$$, 'error');
+
+-- bob (admin): badges.manage + xp.adjust
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('gamif: admin creates badge', $$select public.admin_badge_save('test-bronze','Test Bronze','A test badge','learning','streak',3,'common',15,false,false,true,999)$$, 'ok');
+select t.check('gamif: badge exists with base_key', $$select 1 from public.badge_definitions where key='test-bronze' and base_key='test' and metric='streak' and threshold=3$$, 'rows=1');
+select t.check('gamif: admin updates badge', $$select public.admin_badge_save('test-bronze','Test Bronze v2','Updated','learning','streak',5,'uncommon',25,false,false,false,999)$$, 'ok');
+select t.check('gamif: update kept key, changed fields', $$select 1 from public.badge_definitions where key='test-bronze' and name='Test Bronze v2' and threshold=5 and enabled=false$$, 'rows=1');
+select t.check('gamif: unknown metric refused', $$select public.admin_badge_save('test-bad','X','','learning','no_such_metric',1)$$, 'error');
+select t.check('gamif: bad key refused', $$select public.admin_badge_save('Bad Key!','X','')$$, 'error');
+select t.check('gamif: threshold 0 refused', $$select public.admin_badge_save('test-low','X','','learning','streak',0)$$, 'error');
+
+-- recipients (insert as the DB owner: clients have no INSERT grant on awards)
+reset role;
+insert into public.user_badges (user_id, badge_key) values
+  ('00000000-0000-0000-0000-00000000000c', 'test-bronze');
+set role authenticated;
+select t.check('gamif: recipients listed', $$select 1 from public.admin_badge_recipients('test-bronze') where display_name='carol'$$, 'rows=1');
+reset role; -- award rows of other users are RLS-hidden from admins (read own or pinned only)
+select t.check('gamif: disabling badge keeps awards', $$select 1 from public.user_badges where badge_key='test-bronze' and user_id='00000000-0000-0000-0000-00000000000c'::uuid$$, 'rows=1');
+set role authenticated;
+
+-- XP adjustment flow
+select t.keep('carol_xp', $$select coalesce(xp,0) from public.profiles where id='00000000-0000-0000-0000-00000000000c'::uuid$$);
+select t.check('gamif: xp adjust +50', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, 50, 'Compensation for lost quiz XP', 'adj00001')$$, 'ok');
+select t.check('gamif: profiles.xp increased by 50', $$select 1 from public.profiles where id='00000000-0000-0000-0000-00000000000c'::uuid and coalesce(xp,0)=t.get('carol_xp')::int + 50$$, 'rows=1');
+reset role; -- ledger rows of other users are RLS-hidden from admins (by design)
+select t.check('gamif: ledger row recorded', $$select 1 from public.xp_ledger where user_id='00000000-0000-0000-0000-00000000000c'::uuid and event_key='admin:adj00001' and amount=50 and reason like '[admin]%'$$, 'rows=1');
+set role authenticated;
+select t.check('gamif: replay refused (idempotency)', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, 50, 'Compensation for lost quiz XP', 'adj00001')$$, 'error');
+select t.check('gamif: xp unchanged after replay', $$select 1 from public.profiles where id='00000000-0000-0000-0000-00000000000c'::uuid and coalesce(xp,0)=t.get('carol_xp')::int + 50$$, 'rows=1');
+select t.check('gamif: negative correction works', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, -20, 'Reverse duplicate award', 'adj00002')$$, 'ok');
+select t.check('gamif: profiles.xp decreased by 20', $$select 1 from public.profiles where id='00000000-0000-0000-0000-00000000000c'::uuid and coalesce(xp,0)=t.get('carol_xp')::int + 30$$, 'rows=1');
+select t.check('gamif: short reason refused', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, 10, 'ok', 'adj00003')$$, 'error');
+select t.check('gamif: zero amount refused', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, 0, 'no change at all', 'adj00004')$$, 'error');
+select t.check('gamif: sample profile refused', $$select public.admin_xp_adjust((select id from public.profiles where is_sample limit 1), 10, 'sample target test', 'adj00005')$$, 'error');
+select t.check('gamif: history lists adjustments', $$select 1 from public.admin_xp_history('adj00001') where event_key='admin:adj00001' and needs_review$$, 'rows=1');
+select t.check('gamif: history filter needs_review only', $$select count(*) from public.admin_xp_history('',true) having count(*)>=2$$, 'rows=1');
+
+-- audit
+reset role;
+select t.check('gamif: badge+xp actions audited', $$select count(*) from public.admin_audit_logs where action like 'gamification.%' having count(*)>=4$$, 'rows=1');
+set role authenticated;
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%';
