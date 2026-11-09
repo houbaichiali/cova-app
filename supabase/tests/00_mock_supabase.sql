@@ -43,3 +43,12 @@ grant all on storage.buckets, storage.objects to anon, authenticated;
 create function storage.foldername(p_name text)
 returns text[] language sql immutable as
 $$ select string_to_array(p_name, '/') $$;
+
+-- auth.mfa_factors stand-in (the app only reads user_id + status='verified')
+create table if not exists auth.mfa_factors (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  friendly_name text,
+  status text not null default 'unverified',
+  created_at timestamptz not null default now()
+);

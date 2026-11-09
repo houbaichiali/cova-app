@@ -236,6 +236,41 @@ select t.as_user('00000000-0000-0000-0000-00000000000f');
 select t.check('analytics: analyst (read-only role) reads', $$select public.admin_analytics_summary(7)$$, 'ok');
 select t.check('analytics: analyst still cannot adjust xp', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000e'::uuid, 50, 'test reason again', 'abc124')$$, 'error');
 
+-- ============================================================================
+-- PHASE: security center
+-- ============================================================================
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('security: student denied overview', $$select public.admin_security_overview()$$, 'error');
+select t.check('security: student cannot revoke', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000c'::uuid,'hostile takeover')$$, 'error');
+
+-- bob (admin, security.read) reads the overview but cannot revoke
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('security: admin reads overview', $$select public.admin_security_overview()$$, 'ok');
+select t.keep('ov_admins', $$select jsonb_array_length(public.admin_security_overview()->'admins')$$);
+select t.check('security: overview lists active admins', $$select 1 where t.get('ov_admins')::int >= 3$$, 'rows=1');
+select t.check('security: admin cannot revoke (not founder)', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000c'::uuid,'not allowed')$$, 'error');
+
+-- bootstrap a REAL founder like the owner would (manual SQL step), then revoke
+reset role;
+select t.keep('alice_code', $$select user_code from public.profiles where id='00000000-0000-0000-0000-00000000000a'::uuid$$);
+select public.admin_grant_founder(t.get('alice_code'));
+set role authenticated;
+
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('security: founder reads overview', $$select public.admin_security_overview()$$, 'ok');
+select t.check('security: founder cannot revoke self', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000a'::uuid,'self test')$$, 'error');
+select t.check('security: founder cannot revoke a founder', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000a'::uuid,'founder test')$$, 'error');
+select t.check('security: short reason refused', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000c'::uuid,'x')$$, 'error');
+select t.check('security: founder revokes carol', $$select public.admin_security_revoke_access('00000000-0000-0000-0000-00000000000c'::uuid,'Emergency: compromised account')$$, 'ok');
+reset role;
+select t.check('security: carol roles now revoked', $$select count(*) from public.user_admin_roles where user_id='00000000-0000-0000-0000-00000000000c'::uuid and revoked_at is null having count(*)=0$$, 'rows=1');
+set role authenticated;
+select t.as_user('00000000-0000-0000-0000-00000000000c');
+select t.check('security: revoked moderator loses access', $$select (public.admin_my_access()->>'is_admin')$$, 'rows=1');
+reset role;
+select t.check('security: revoke audited', $$select 1 from (select count(*) as n from public.admin_audit_logs where action='admin.revoke_access') x where n>=1$$, 'rows=1');
+set role authenticated;
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%';
