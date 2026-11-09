@@ -19,6 +19,7 @@ export interface MyProfile {
   bio: string | null;
   headline: string | null;
   domain: string | null;
+  location: string | null;
   prog_languages: string[] | null;
   spoken_languages: string[] | null;
   avatar_url: string | null;
@@ -29,6 +30,7 @@ export interface ProfileFormValues {
   displayName: string;
   headline: string;
   domain: string;
+  location: string;
   progLanguages: string[];
   spokenLanguages: string[];
   bio: string;
@@ -140,6 +142,7 @@ export function useMyProfile() {
           display_name: displayName.slice(0, 60),
           headline: values.headline.trim().slice(0, 120),
           domain: values.domain.trim().slice(0, 80),
+          location: values.location.trim().slice(0, 80),
           prog_languages: values.progLanguages,
           spoken_languages: values.spokenLanguages,
           bio: values.bio.trim().slice(0, 500),

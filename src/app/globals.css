@@ -349,3 +349,19 @@ html.dark {
 .quiz-delay-2 {
   animation-delay: 0.24s;
 }
+
+/* Badge marquee: seamless horizontal loop (track rendered twice). */
+@keyframes cova-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[cova-marquee_32s_linear_infinite\] {
+    animation: none;
+  }
+}
