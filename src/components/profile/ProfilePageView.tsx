@@ -26,9 +26,12 @@ import { useT } from "@/i18n/client";
 import { levelForXp } from "@/lib/level-curve";
 import {
   ALIGN_CLASS,
+  BORDER_CLASS,
   COVER_PRESET_CLASS,
   FONT_STACKS,
   WEIGHT_CLASS,
+  marqueeBackground,
+  marqueeTextColor,
   nameOnCover,
   type Appearance,
 } from "@/lib/appearance";
@@ -225,7 +228,25 @@ export function ProfilePageView({ model }: { model: ProfileRenderModel }) {
         (data.badges === null ? (
           <Skeleton className="h-28 rounded-xl" />
         ) : (
-          <BadgeMarquee badges={data.badges ?? []} />
+          <BadgeMarquee
+            badges={data.badges ?? []}
+            className={marqueeBackground(appearance)}
+            style={{
+              backgroundColor:
+                appearance.marquee_kind === "color" && appearance.marquee_color
+                  ? appearance.marquee_color
+                  : undefined,
+              ...(appearance.marquee_border !== "none" && appearance.marquee_border_color
+                ? appearance.marquee_border === "glow"
+                  ? { boxShadow: `0 0 0 2px ${appearance.marquee_border_color}` }
+                  : {
+                      borderStyle: appearance.marquee_border === "dashed" ? "dashed" : "solid",
+                      borderColor: appearance.marquee_border_color,
+                    }
+                : {}),
+            }}
+            textStyle={{ color: marqueeTextColor(appearance) }}
+          />
         ))}
 
       {/* ----------------------------------------------------------- stats */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { Award, Sparkles } from "lucide-react";
 
 import { Modal } from "@/components/ui/Modal";
@@ -30,10 +30,12 @@ export interface BadgeMarqueeProps {
   badges: EarnedBadge[];
   /** Background/border come from the appearance editor; text color for contrast. */
   className?: string;
+  style?: CSSProperties;
+  textStyle?: CSSProperties;
   emptyLabel?: string;
 }
 
-export function BadgeMarquee({ badges, className, emptyLabel }: BadgeMarqueeProps) {
+export function BadgeMarquee({ badges, className, style, textStyle, emptyLabel }: BadgeMarqueeProps) {
   const t = useT();
   const [selected, setSelected] = useState<EarnedBadge | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -43,7 +45,7 @@ export function BadgeMarquee({ badges, className, emptyLabel }: BadgeMarqueeProp
 
   if (badges.length === 0) {
     return (
-      <div className={cn("rounded-xl p-4", className)}>
+      <div className={cn("rounded-xl p-4", className)} style={style}>
         <EmptyState
           icon={Award}
           title={t("profile.marquee.emptyTitle")}
@@ -54,7 +56,7 @@ export function BadgeMarquee({ badges, className, emptyLabel }: BadgeMarqueeProp
   }
 
   return (
-    <div className={cn("rounded-xl p-3 overflow-hidden", className)}>
+    <div className={cn("rounded-xl p-3 overflow-hidden", className)} style={style}>
       <div className="group relative">
         <div
           className={cn(
@@ -81,7 +83,7 @@ export function BadgeMarquee({ badges, className, emptyLabel }: BadgeMarqueeProp
               ) : (
                 <Sparkles className="h-6 w-6" aria-hidden="true" />
               )}
-              <span className="line-clamp-2 text-[11px] font-semibold leading-tight">{badge.name}</span>
+              <span className="line-clamp-2 text-[11px] font-semibold leading-tight" style={textStyle}>{badge.name}</span>
             </button>
           ))}
         </div>
@@ -90,6 +92,7 @@ export function BadgeMarquee({ badges, className, emptyLabel }: BadgeMarqueeProp
         <button
           type="button"
           onClick={() => setShowAll(true)}
+          style={textStyle}
           className="text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100"
         >
           {t("profile.marquee.viewAll")}
