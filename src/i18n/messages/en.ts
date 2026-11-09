@@ -2253,6 +2253,23 @@ export const en = {
   "portfolio.print.generatedFrom": "Generated from {url}",
   "portfolio.print.hint": "Choose “Save as PDF” in your browser\'s print dialog.",
 
+
+  "profile.milestones.title": "Journey milestones",
+  "profile.milestones.hint": "Student-added milestones — shown in the journey timeline and always labeled as yours.",
+  "profile.milestones.add": "Add milestone",
+  "profile.milestones.name": "Milestone",
+  "profile.milestones.date": "Date",
+  "profile.milestones.description": "Description",
+  "profile.milestones.saved": "Milestones updated.",
+  "profile.milestones.delete": "Delete milestone",
+  "profile.milestones.confirmDelete": "Delete this milestone?",
+  "profile.milestones.empty": "No milestones yet — add moments like “First hackathon”.",
+  "profile.privacy.label": "Visibility",
+  "profile.copyLink": "Copy profile link",
+  "profile.linkCopied": "Profile link copied.",
+  "portfolio.imports.selectedHint": "Add a personal note, feature or reorder — the original record stays untouched.",
+  "portfolio.imports.note": "Personal note",
+  "portfolio.imports.notePlaceholder": "What did this mean for you? (optional)",
 } as const;
 
 export type MessageKey = keyof typeof en;

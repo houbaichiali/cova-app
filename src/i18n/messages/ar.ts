@@ -2215,4 +2215,21 @@ export const ar: Record<MessageKey, string> = {
   "portfolio.print.generatedFrom": "مولّد من {url}",
   "portfolio.print.hint": "اختر «حفظ كـ PDF» من نافذة الطباعة.",
 
+  "profile.milestones.title": "محطات الرحلة",
+  "profile.milestones.hint": "محطات أضفتها بنفسك — تظهر في الرحلة وتُوسم دائماً بأنها منك.",
+  "profile.milestones.add": "إضافة محطة",
+  "profile.milestones.name": "المحطة",
+  "profile.milestones.date": "التاريخ",
+  "profile.milestones.description": "الوصف",
+  "profile.milestones.saved": "تم تحديث المحطات.",
+  "profile.milestones.delete": "حذف المحطة",
+  "profile.milestones.confirmDelete": "حذف هذه المحطة؟",
+  "profile.milestones.empty": "لا محطات بعد — أضف لحظات مثل «أول هاكاثون لي».",
+  "profile.privacy.label": "الرؤية",
+  "profile.copyLink": "نسخ رابط الملف",
+  "profile.linkCopied": "تم نسخ رابط الملف.",
+  "portfolio.imports.selectedHint": "أضف ملاحظة شخصية أو ميّز أو رتّب — السجل الأصلي يبقى كما هو.",
+  "portfolio.imports.note": "ملاحظة شخصية",
+  "portfolio.imports.notePlaceholder": "ماذا يعني هذا لك؟ (اختياري)",
+
 };

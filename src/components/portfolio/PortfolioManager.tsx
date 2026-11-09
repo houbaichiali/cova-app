@@ -712,6 +712,7 @@ function ImportsTab({ portfolio }: { portfolio: Portfolio }) {
     assignments: { source_id: string; title: string; course: string | null; submitted_at: string }[];
     challenges: { source_id: string; title: string; category: string; submitted_at: string }[];
   } | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void (async () => {
@@ -747,6 +748,24 @@ function ImportsTab({ portfolio }: { portfolio: Portfolio }) {
       return;
     }
     await portfolio.reload();
+  }
+
+  async function updateImport(id: string, patch: { featured?: boolean; note?: string; position?: number }) {
+    const supabase = (await import("@/lib/supabase/client")).getSupabase();
+    const { error } = await supabase.from("portfolio_imports").update(patch).eq("id", id);
+    if (error) {
+      toast.push(error.message);
+      return;
+    }
+    await portfolio.reload();
+  }
+
+  async function swapImports(index: number, target: number) {
+    const current = portfolio.imports[index];
+    const other = portfolio.imports[target];
+    if (!current || !other || target < 0 || target >= portfolio.imports.length) return;
+    await updateImport(current.id, { position: target });
+    await updateImport(other.id, { position: index });
   }
 
   const importedIds = new Set(portfolio.imports.map((row) => `${row.source_kind}:${row.source_id}`));
@@ -818,29 +837,52 @@ function ImportsTab({ portfolio }: { portfolio: Portfolio }) {
       </Card>
 
       <Card>
-        <CardHeader title={t("portfolio.imports.selected")} />
+        <CardHeader title={t("portfolio.imports.selected")} description={t("portfolio.imports.selectedHint")} />
         <CardBody>
           {portfolio.imports.length === 0 ? (
             <p className="text-sm text-cova-mute">{t("portfolio.imports.emptyEditor")}</p>
           ) : (
-            <ul className="space-y-1.5">
-              {portfolio.imports.map((row) => (
-                <li key={row.id} className="flex items-center justify-between gap-2 rounded-lg border border-cova-line bg-white px-3 py-1.5">
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{row.title}</span>
-                    <span className="text-xs text-cova-mute">
-                      {row.source_kind === "assignment" ? t("portfolio.imports.assignments") : t("portfolio.imports.challenges")}
-                      {row.date ? ` · ${new Date(row.date).toLocaleDateString()}` : ""}
+            <ul className="space-y-2">
+              {portfolio.imports.map((row, index) => (
+                <li key={row.id} className="rounded-lg border border-cova-line bg-white px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">
+                        {row.title}
+                        {row.featured && <Star className="ms-1 inline h-3.5 w-3.5 fill-amber-400 text-amber-400" aria-hidden="true" />}
+                      </span>
+                      <span className="text-xs text-cova-mute">
+                        {row.source_kind === "assignment" ? t("portfolio.imports.assignments") : t("portfolio.imports.challenges")}
+                        {row.date ? ` · ${new Date(row.date).toLocaleDateString()}` : ""}
+                      </span>
                     </span>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={t("portfolio.imports.remove")}
-                    onClick={() => void removeImport(row.id)}
-                    className="rounded p-1.5 text-cova-mute hover:bg-cova-pale"
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </button>
+                    <span className="flex items-center gap-1">
+                      <button type="button" aria-label={t("portfolio.projects.feature")} onClick={() => void updateImport(row.id, { featured: !row.featured })} className="rounded p-1.5 hover:bg-cova-pale">
+                        <Star className={`h-4 w-4 ${row.featured ? "fill-amber-400 text-amber-400" : "text-cova-mute"}`} aria-hidden="true" />
+                      </button>
+                      <button type="button" aria-label={t("profile.subjects.moveUp")} disabled={index === 0} onClick={() => void swapImports(index, index - 1)} className="rounded p-1.5 text-cova-mute hover:bg-cova-pale disabled:opacity-30">
+                        <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <button type="button" aria-label={t("profile.subjects.moveDown")} disabled={index === portfolio.imports.length - 1} onClick={() => void swapImports(index, index + 1)} className="rounded p-1.5 text-cova-mute hover:bg-cova-pale disabled:opacity-30">
+                        <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <button type="button" aria-label={t("portfolio.imports.remove")} onClick={() => void removeImport(row.id)} className="rounded p-1.5 text-cova-mute hover:bg-cova-pale">
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </span>
+                  </div>
+                  <input
+                    value={noteDrafts[row.id] ?? row.note}
+                    onChange={(event) => setNoteDrafts({ ...noteDrafts, [row.id]: event.target.value })}
+                    placeholder={t("portfolio.imports.notePlaceholder")}
+                    aria-label={t("portfolio.imports.note")}
+                    maxLength={500}
+                    className="mt-2 h-8 w-full rounded-lg border border-cova-line bg-white px-2 text-xs"
+                    onBlur={() => {
+                      const note = (noteDrafts[row.id] ?? row.note).slice(0, 500);
+                      if (note !== row.note) void updateImport(row.id, { note });
+                    }}
+                  />
                 </li>
               ))}
             </ul>

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { UserRound } from "lucide-react";
+import { Link2, UserRound } from "lucide-react";
 
 import { ProfilePageView, type ProfileRenderModel } from "@/components/profile/ProfilePageView";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { useT } from "@/i18n/client";
 import { Skeleton } from "@/components/ui/Skeleton";
 import {
   fetchPublicProfile,
@@ -34,6 +35,8 @@ const SECTIONS: ProfileSection[] = [
 ];
 
 export function PublicProfile({ code, notFoundLabel }: { code: string; notFoundLabel: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
   const [overview, setOverview] = useState<PublicProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
@@ -98,6 +101,12 @@ export function PublicProfile({ code, notFoundLabel }: { code: string; notFoundL
     return <EmptyState icon={UserRound} title={notFoundLabel} description={code} />;
   }
 
+  async function copyLink() {
+    await navigator.clipboard.writeText(`${window.location.origin}/u/${code}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   const model: ProfileRenderModel = {
     identity: {
       user_code: overview.profile.user_code,
@@ -126,5 +135,19 @@ export function PublicProfile({ code, notFoundLabel }: { code: string; notFoundL
     },
   };
 
-  return <ProfilePageView model={model} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void copyLink()}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-cova-line px-3 text-xs font-medium hover:bg-cova-pale"
+        >
+          {copied ? <UserRound className="h-3.5 w-3.5" aria-hidden="true" /> : <Link2 className="h-3.5 w-3.5" aria-hidden="true" />}
+          {copied ? t("profile.linkCopied") : t("profile.copyLink")}
+        </button>
+      </div>
+      <ProfilePageView model={model} />
+    </div>
+  );
 }

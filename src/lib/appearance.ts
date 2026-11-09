@@ -366,7 +366,7 @@ export function marqueeBackground(appearance: Appearance): string {
     return "";
   if (appearance.marquee_kind === "preset")
     return MARQUEE_PRESET_CLASS[appearance.marquee_preset];
-  return "bg-white/60 border border-cova-line";
+  return "border border-cova-line bg-white/60 dark:bg-white/10";
 }
 
 export function marqueeTextColor(appearance: Appearance): string {

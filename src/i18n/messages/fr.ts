@@ -2277,4 +2277,21 @@ export const fr: Record<MessageKey, string> = {
   "portfolio.print.generatedFrom": "Généré depuis {url}",
   "portfolio.print.hint": "Choisissez « Enregistrer en PDF » dans la boîte d\'impression.",
 
+  "profile.milestones.title": "Étapes du parcours",
+  "profile.milestones.hint": "Étapes ajoutées par vous — affichées dans le parcours et toujours étiquetées comme telles.",
+  "profile.milestones.add": "Ajouter une étape",
+  "profile.milestones.name": "Étape",
+  "profile.milestones.date": "Date",
+  "profile.milestones.description": "Description",
+  "profile.milestones.saved": "Étapes mises à jour.",
+  "profile.milestones.delete": "Supprimer l\'étape",
+  "profile.milestones.confirmDelete": "Supprimer cette étape ?",
+  "profile.milestones.empty": "Aucune étape — ajoutez des moments comme « Mon premier hackathon ».",
+  "profile.privacy.label": "Visibilité",
+  "profile.copyLink": "Copier le lien du profil",
+  "profile.linkCopied": "Lien du profil copié.",
+  "portfolio.imports.selectedHint": "Ajoutez une note personnelle, mettez en vedette ou réorganisez — l\'enregistrement d\'origine reste intact.",
+  "portfolio.imports.note": "Note personnelle",
+  "portfolio.imports.notePlaceholder": "Qu\'est-ce que cela a signifié pour vous ? (optionnel)",
+
 };

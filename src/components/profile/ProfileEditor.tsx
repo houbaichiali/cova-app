@@ -6,6 +6,7 @@ import { Camera, CircleUserRound, Eye, ExternalLink, Loader2, Save } from "lucid
 
 import type { ProfileRenderModel } from "@/components/profile/ProfilePageView";
 import { AppearanceEditor } from "@/components/profile/AppearanceEditor";
+import { MilestonesEditor } from "@/components/profile/MilestonesEditor";
 import { PreviewOverlay } from "@/components/profile/PreviewOverlay";
 import { SectionsEditor } from "@/components/profile/SectionsEditor";
 import { Avatar } from "@/components/ui/Avatar";
@@ -399,13 +400,16 @@ export function ProfileEditor() {
       )}
 
       {tab === "sections" && (
-        <SectionsEditor
-          subjects={workspace.subjects}
-          goals={workspace.goals}
-          onSubjectsChange={workspace.setSubjectsPersisted}
-          onGoalUpsert={workspace.upsertGoal}
-          onGoalDelete={workspace.deleteGoal}
-        />
+        <div className="space-y-6">
+          <SectionsEditor
+            subjects={workspace.subjects}
+            goals={workspace.goals}
+            onSubjectsChange={workspace.setSubjectsPersisted}
+            onGoalUpsert={workspace.upsertGoal}
+            onGoalDelete={workspace.deleteGoal}
+          />
+          <MilestonesEditor />
+        </div>
       )}
 
       {tab === "privacy" && (
