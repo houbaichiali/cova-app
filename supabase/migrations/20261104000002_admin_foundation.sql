@@ -257,7 +257,7 @@ $$;
 revoke all on function public.admin_grant_founder(text) from public, authenticated, anon;
 revoke all on function public.is_admin_user(text) from public, anon;
 revoke all on function public.admin_my_access() from public, anon;
-revoke all on function public.admin_audit(text, text, text, text, jsonb) from public, anon;
+revoke all on function public.admin_audit(text, text, text, text, jsonb, uuid) from public, anon;
 grant execute on function public.is_admin_user(text) to authenticated;
 grant execute on function public.admin_my_access() to authenticated;
 
