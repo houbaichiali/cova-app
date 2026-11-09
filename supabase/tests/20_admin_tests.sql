@@ -305,6 +305,34 @@ reset role;
 select t.check('settings: update audited with before/after', $$select 1 from public.admin_audit_logs where action='settings.update' and target_id='moderation.xp_review_threshold' and metadata->'after' = '10'::jsonb$$, 'rows=1');
 set role authenticated;
 
+-- ============================================================================
+-- PHASE: team management (founder-only)
+-- ============================================================================
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('team: admin cannot list team', $$select * from public.admin_team_list()$$, 'error');
+select t.check('team: admin cannot grant', $$select public.admin_team_grant('CV-ANYTHING','moderator','promoting carol again')$$, 'error');
+select t.check('team: admin cannot revoke', $$select public.admin_team_revoke(gen_random_uuid(),'not allowed')$$, 'error');
+
+-- alice is founder (bootstrapped in the security phase tests)
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.check('team: founder lists team', $$select count(*) from public.admin_team_list() having count(*)>=3$$, 'rows=1');
+select t.keep('carol_code', $$select user_code from public.profiles where id='00000000-0000-0000-0000-00000000000c'::uuid$$);
+select t.check('team: founder grants carol moderator again', $$select public.admin_team_grant(t.get('carol_code'),'moderator','Reinstated after review')$$, 'ok');
+select t.check('team: duplicate grant refused', $$select public.admin_team_grant(t.get('carol_code'),'moderator','dup test')$$, 'error');
+select t.check('team: founder role refused', $$select public.admin_team_grant(t.get('carol_code'),'founder','founder test')$$, 'error');
+select t.check('team: unknown role refused', $$select public.admin_team_grant(t.get('carol_code'),'emperor','nope')$$, 'error');
+select t.check('team: unknown code refused', $$select public.admin_team_grant('CV-ZZZZZZ','moderator','nobody')$$, 'error');
+select t.check('team: short reason refused', $$select public.admin_team_grant(t.get('carol_code'),'support','ok')$$, 'error');
+reset role; -- the grants table has no client SELECT grant (RPC-only, by design)
+select t.keep('carol_grant', $$select id from public.user_admin_roles where user_id='00000000-0000-0000-0000-00000000000c'::uuid and role_key='moderator' and revoked_at is null limit 1$$);
+set role authenticated;
+select t.check('team: founder revokes grant', $$select public.admin_team_revoke(t.get('carol_grant')::uuid,'Trial period ended')$$, 'ok');
+select t.check('team: double revoke refused', $$select public.admin_team_revoke(t.get('carol_grant')::uuid,'again')$$, 'error');
+select t.check('team: founder cannot be demoted via grant row', $$select 1 from public.admin_team_list() where role_key='founder' and user_id='00000000-0000-0000-0000-00000000000a'::uuid and revoked_at is null$$, 'rows=1');
+reset role;
+select t.check('team: grant+revoke audited', $$select count(*) from public.admin_audit_logs where action in ('admin.grant_role','admin.revoke_role') having count(*)>=2$$, 'rows=1');
+set role authenticated;
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%' or label like 'team:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%' or label like 'team:%';
