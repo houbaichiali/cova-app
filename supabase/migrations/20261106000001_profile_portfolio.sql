@@ -31,6 +31,12 @@
 --     invented from the browser.
 -- =============================================================================
 
+-- Optional header info on the EXISTING profiles table (additive only).
+alter table public.profiles
+  add column if not exists location text not null default ''
+  check (char_length(location) <= 80);
+grant update (location) on public.profiles to authenticated;
+
 ----------------------------------------------------------------- appearance
 
 create table if not exists public.profile_appearance (
@@ -740,6 +746,7 @@ begin
       'prog_languages', p.prog_languages,
       'spoken_languages', p.spoken_languages,
       'avatar_url', p.avatar_url,
+      'location', p.location,
       'joined', p.created_at
     ),
     'appearance', to_jsonb(v_ap),
@@ -967,7 +974,7 @@ begin
         select coalesce(jsonb_agg(jsonb_build_object(
             'id', c.id, 'kind', c.kind, 'title', c.title, 'issuer', c.issuer,
             'issue_date', c.issue_date, 'description', c.description,
-            'verification_status', c.verification_status, 'has_file', c.file_path is not null
+            'verification_status', c.verification_status, 'file_path', c.file_path
           ) order by coalesce(c.issue_date, c.created_at::date) desc), '[]'::jsonb)
         from public.portfolio_certificates c
         where c.user_id = v_owner
@@ -1069,7 +1076,7 @@ begin
       select coalesce(jsonb_agg(jsonb_build_object(
           'id', c.id, 'kind', c.kind, 'title', c.title, 'issuer', c.issuer,
           'issue_date', c.issue_date, 'description', c.description,
-          'verification_status', c.verification_status, 'has_file', c.file_path is not null
+          'verification_status', c.verification_status, 'file_path', c.file_path
         ) order by coalesce(c.issue_date, c.created_at::date) desc), '[]'::jsonb)
       from public.portfolio_certificates c
       where c.user_id = v_owner
