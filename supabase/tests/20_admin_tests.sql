@@ -271,6 +271,40 @@ reset role;
 select t.check('security: revoke audited', $$select 1 from (select count(*) as n from public.admin_audit_logs where action='admin.revoke_access') x where n>=1$$, 'rows=1');
 set role authenticated;
 
+-- ============================================================================
+-- PHASE: administrative settings
+-- ============================================================================
+select t.as_user('00000000-0000-0000-0000-00000000000e');
+select t.check('settings: student cannot list', $$select * from public.admin_settings_list()$$, 'error');
+select t.check('settings: student cannot update', $$select public.admin_settings_update('moderation.xp_review_threshold','10','student tampering')$$, 'error');
+
+-- analyst can read (plain admin read) but not write
+select t.as_user('00000000-0000-0000-0000-00000000000f');
+select t.check('settings: analyst reads list', $$select * from public.admin_settings_list()$$, 'rows=3');
+select t.check('settings: analyst cannot update', $$select public.admin_settings_update('moderation.xp_review_threshold','10','not allowed')$$, 'error');
+
+-- bob (admin: settings.manage)
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.check('settings: admin lists 3 settings', $$select count(*) from public.admin_settings_list() having count(*)=3$$, 'rows=1');
+select t.check('settings: update threshold to 10', $$select public.admin_settings_update('moderation.xp_review_threshold','10','Tighten XP review for the semester')$$, 'ok');
+select t.check('settings: value persisted', $$select 1 from public.admin_settings_list() where key='moderation.xp_review_threshold' and value='10'::jsonb$$, 'rows=1');
+select t.check('settings: out of range refused', $$select public.admin_settings_update('moderation.xp_review_threshold','999999','way too high')$$, 'error');
+select t.check('settings: wrong type refused', $$select public.admin_settings_update('moderation.xp_review_threshold','"abc"','not a number')$$, 'error');
+select t.check('settings: unknown key refused', $$select public.admin_settings_update('security.backdoor','true','nope')$$, 'error');
+select t.check('settings: short reason refused', $$select public.admin_settings_update('moderation.report_queue_limit','150','ok')$$, 'error');
+
+-- REAL consumption: with threshold=10, a 20 XP adjustment is now flagged
+select t.check('settings: adjust 20 xp (above new threshold)', $$select public.admin_xp_adjust('00000000-0000-0000-0000-00000000000c'::uuid, 20, 'Threshold consumption proof', 'adj00010')$$, 'ok');
+reset role;
+select t.check('settings: 20 XP ledger row flagged needs_review', $$select 1 from (select (public.admin_setting_int('moderation.xp_review_threshold',300)) as thr) x where thr=10$$, 'rows=1');
+set role authenticated;
+select t.check('settings: history uses new threshold', $$select 1 from public.admin_xp_history('adj00010', true) where amount=20 and needs_review$$, 'rows=1');
+
+-- audit with before/after
+reset role;
+select t.check('settings: update audited with before/after', $$select 1 from public.admin_audit_logs where action='settings.update' and target_id='moderation.xp_review_threshold' and metadata->'after' = '10'::jsonb$$, 'rows=1');
+set role authenticated;
+
 \echo ======== ADMIN RESULTS ========
-select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' order by ok, label;
-select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%';
+select case when ok then 'PASS' else 'FAIL' end || ' | ' || label || ' | ' || detail from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%' order by ok, label;
+select 'ADMIN TOTAL ' || count(*) || ' pass=' || count(*) filter (where ok) || ' fail=' || count(*) filter (where not ok) from t.results where label like 'rules:%' or label like 'content:%' or label like 'gamif:%' or label like 'analytics:%' or label like 'security:%' or label like 'settings:%';
