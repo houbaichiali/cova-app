@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Award, Coins, ImagePlus, Layers, Pencil, Plus, SearchCheck, Users } from "lucide-react";
+import { Award, Coins, ImagePlus, Pencil, Plus, Users } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";

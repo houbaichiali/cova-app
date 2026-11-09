@@ -80,6 +80,7 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     } catch {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional synchronous fallback: degrade to the 2D stage instead of crashing the room
       setGlBroken(true);
       return;
     }

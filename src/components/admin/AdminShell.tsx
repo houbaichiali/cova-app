@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, BarChart3, BookOpenCheck, LayoutDashboard, Menu, ScrollText, Settings, ShieldAlert, ShieldPlus, Trophy, UserCog, Users, X } from "lucide-react";
 import { useAdminAccess } from "@/lib/admin-client";
-import { useT } from "@/i18n/client";
+import { useI18n, useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
 interface AdminNavItem {
@@ -30,15 +30,24 @@ const NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/team", labelKey: "admin.nav.team", icon: UserCog, permission: "team.manage" },
 ];
 
-/** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents. */
+/** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents.
+ * Fully RTL-mirrored (Arabic) like the student AppShell. */
 export function AdminShell({ children }: { children: ReactNode }) {
   const t = useT();
+  const { dir } = useI18n();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const access = useAdminAccess();
+  const rtl = dir === "rtl";
 
   return (
-    <div className="min-h-screen bg-cova-bg">
+    <div dir={dir} className="min-h-screen bg-cova-bg">
+      <a
+        href="#admin-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2"
+      >
+        {t("common.skip")}
+      </a>
       {open && (
         <div className="fixed inset-0 z-30 bg-cova-ink/50 lg:hidden" onClick={() => setOpen(false)} aria-hidden="true" />
       )}
@@ -47,11 +56,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
       <aside
         aria-label={t("admin.center.title")}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-[#16283C] text-slate-200 transition-transform lg:translate-x-0",
-          open ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 z-40 flex w-60 flex-col bg-admin-navy text-slate-200 transition-transform lg:translate-x-0",
+          rtl ? "right-0" : "left-0",
+          open ? "translate-x-0" : rtl ? "translate-x-full" : "-translate-x-full",
         )}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-5">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-admin-navy-line px-5">
           <div className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white">
               A
@@ -92,19 +102,19 @@ export function AdminShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="border-t border-white/10 p-3">
+        <div className="border-t border-admin-navy-line p-3">
           <Link
             href="/dashboard"
             className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
           >
-            <ArrowLeft className="h-4.5 w-4.5" aria-hidden="true" />
+            <ArrowLeft className={cn("h-4.5 w-4.5", rtl && "rotate-180")} aria-hidden="true" />
             {t("admin.nav.backToStudent")}
           </Link>
         </div>
       </aside>
 
       {/* Mobile top bar */}
-      <div className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-cova-line bg-[#16283C] px-4 text-white lg:hidden">
+      <div className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-admin-navy-line bg-admin-navy px-4 text-white lg:hidden">
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -116,9 +126,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <span className="text-sm font-semibold uppercase tracking-[0.16em]">{t("admin.center.title")}</span>
       </div>
 
-      {/* Light workspace */}
-      <div className="lg:pl-60">
-        <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">{children}</main>
+      {/* Light workspace (mirrored for RTL) */}
+      <div className={rtl ? "lg:pr-60" : "lg:pl-60"}>
+        <main id="admin-main" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">{children}</main>
       </div>
     </div>
   );

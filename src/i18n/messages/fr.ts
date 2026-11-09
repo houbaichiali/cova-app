@@ -1432,7 +1432,7 @@ export const fr: Record<MessageKey, string> = {
   "admin.mfa.done": "Authentification à deux facteurs activée.",
   "admin.mfa.requiredShort": "MFA requis",
   "admin.home.welcome": "Bienvenue dans le Centre d'administration COVA",
-  "admin.home.phase": "D'autres modules arrivent dans les prochaines phases : utilisateurs, modération, analytique, sécurité.",
+  "admin.home.phase": "Tous les modules sont en ligne : utilisateurs, modération, règles, revue du contenu, gamification, analytique, sécurité, paramètres et équipe.",
   "admin.home.role": "Ton rôle",
   "admin.home.permissions": "Permissions",
   "admin.home.mfa": "Authentification à deux facteurs",
@@ -1932,4 +1932,5 @@ export const fr: Record<MessageKey, string> = {
   "admin.team.past": "Attributions passées",
   "admin.team.revokedOn": "Révoqué le",
   "admin.team.loadError": "Impossible de charger l'équipe. Vérifiez que les migrations admin sont appliquées.",
+  "admin.home.complete": "Tous les modules sont en ligne : utilisateurs, modération, règles, revue du contenu, gamification, analytique, sécurité, paramètres et équipe.",
 };

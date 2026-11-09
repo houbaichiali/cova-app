@@ -1372,7 +1372,7 @@ export const ar: Record<MessageKey, string> = {
   "admin.mfa.done": "تم تفعيل التحقق بخطوتين.",
   "admin.mfa.requiredShort": "MFA مطلوب",
   "admin.home.welcome": "مرحبًا بك في مركز إدارة COVA",
-  "admin.home.phase": "وحدات أخرى قادمة في المراحل التالية: المستخدمون، الإشراف، التحليلات، الأمان.",
+  "admin.home.phase": "جميع الوحدات متاحة الآن: المستخدمون والإشراف والقواعد ومراجعة المحتوى والتحفيز والتحليلات والأمان والإعدادات والفريق.",
   "admin.home.role": "دورك",
   "admin.home.permissions": "الصلاحيات",
   "admin.home.mfa": "التحقق بخطوتين",
@@ -1870,4 +1870,5 @@ export const ar: Record<MessageKey, string> = {
   "admin.team.past": "المنح السابقة",
   "admin.team.revokedOn": "سُحب في",
   "admin.team.loadError": "تعذر تحميل الفريق. تحقق من تطبيق ترحيلات المشرف.",
+  "admin.home.complete": "جميع الوحدات متاحة الآن: المستخدمون والإشراف والقواعد ومراجعة المحتوى والتحفيز والتحليلات والأمان والإعدادات والفريق.",
 };

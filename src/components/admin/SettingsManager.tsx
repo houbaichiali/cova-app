@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/Switch";
 import { TextField } from "@/components/ui/FormField";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import { useI18n, useT } from "@/i18n/client";
+import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 
 interface SettingRow {
@@ -28,8 +28,6 @@ interface SettingRow {
 /** Locked security items: shown read-only — they are enforced in code/env by
  * design, not configurable from the UI (separation of ordinary configuration
  * from sensitive global operations). */
-const LOCKED_KEYS = ["security.require_mfa_admin", "security.service_role"] as const;
-
 const LOCKED_ITEMS = [
   { key: "security.require_mfa_admin", value: "enforced" },
   { key: "security.service_role", value: "server-env" },
@@ -40,7 +38,6 @@ const CATEGORY_ORDER = ["moderation", "gamification", "content", "general", "com
 /** Administrative settings: typed, validated server-side, audited. */
 export function SettingsManager() {
   const t = useT();
-  const { formatTag } = useI18n();
   const toast = useToast();
 
   const [rows, setRows] = useState<SettingRow[] | null>(null);

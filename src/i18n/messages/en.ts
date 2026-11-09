@@ -1408,7 +1408,7 @@ export const en = {
   "admin.mfa.done": "Two-factor authentication enabled.",
   "admin.mfa.requiredShort": "MFA needed",
   "admin.home.welcome": "Welcome to the COVA Admin Center",
-  "admin.home.phase": "More modules arrive in the next phases: users, moderation, analytics, security.",
+  "admin.home.phase": "All modules are now live: users, moderation, rules, content review, gamification, analytics, security, settings and team.",
   "admin.home.role": "Your role",
   "admin.home.permissions": "Permissions",
   "admin.home.mfa": "Two-factor authentication",
@@ -1907,6 +1907,7 @@ export const en = {
   "admin.team.past": "Past grants",
   "admin.team.revokedOn": "Revoked",
   "admin.team.loadError": "Could not load the team. Check that the admin migrations are applied.",
+  "admin.home.complete": "All modules are now live: users, moderation, rules, content review, gamification, analytics, security, settings and team.",
 } as const;
 
 export type MessageKey = keyof typeof en;
