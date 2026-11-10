@@ -42,8 +42,17 @@ export function isBroadcastDub(c: { tt?: string | null; tlang?: string | null })
 /**
  * Volume a ducked speaker's raw microphone returns to: while their dubbing is
  * active the room must keep hearing the translation, not the original voice,
- * so the restore level stays whisper-low until dubbing switches off.
+ * so the restore level stays whisper-low until dubbing switches off. When the
+ * duck ends for good, the listener gets back THEIR OWN chosen loudness for
+ * that person (the volume slider), not a hard-coded default.
  */
 export function duckRestoreVolume(dubbingActive: boolean): number {
   return dubbingActive ? 0.06 : 1;
+}
+
+/** Final level after a duck: still dubbing -> whisper; else the user's slider. */
+export function resolveRestoreVolume(stillDubbing: boolean, userVolume?: number): number {
+  if (stillDubbing) return 0.06;
+  const v = userVolume ?? 1;
+  return Math.min(1, Math.max(0, v));
 }

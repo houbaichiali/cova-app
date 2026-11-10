@@ -15,7 +15,6 @@ import {
 } from "@/components/voicing/useCaptionView";
 import {
   dubIsOn,
-  duckRestoreVolume,
   isBroadcastDub,
   shouldRestartRecognition,
 } from "@/components/voicing/dubModel";
@@ -97,6 +96,7 @@ export function VoiceCaptions({
   send,
   expanded,
   setPeerVolume,
+  restorePeerVolume,
   onDubChange,
   dubToggleN,
   dubHighlight,
@@ -108,6 +108,8 @@ export function VoiceCaptions({
   /** Panel visibility only — translation/dubbing stay active when false. */
   expanded: boolean;
   setPeerVolume: (uid: string, v: number) => void;
+  /** Ends a duck: back to MY chosen loudness for that person. */
+  restorePeerVolume: (uid: string, stillDubbing: boolean) => void;
   /** Tells the control bar whether the دبلجة button should read on/off. */
   onDubChange?: (on: boolean, langCode: string) => void;
   /** Bumped by the control bar's دبلجة button to start/stop dubbing. */
@@ -172,6 +174,10 @@ export function VoiceCaptions({
   useEffect(() => {
     setPVRef.current = setPeerVolume;
   }, [setPeerVolume]);
+  const restorePVRef = useRef(restorePeerVolume);
+  useEffect(() => {
+    restorePVRef.current = restorePeerVolume;
+  }, [restorePeerVolume]);
   const localeTag = speechLang(locale);
 
   const supported =
@@ -192,7 +198,7 @@ export function VoiceCaptions({
       uid,
       window.setTimeout(() => {
         duckTimers.current.delete(uid);
-        setPVRef.current(uid, duckRestoreVolume(!!remoteDubsRef.current[uid]));
+        restorePVRef.current(uid, !!remoteDubsRef.current[uid]);
       }, ms),
     );
   }, []);
@@ -206,7 +212,7 @@ export function VoiceCaptions({
     }
     const prev = prevDubsRef.current;
     for (const uid of Object.keys(prev)) {
-      if (!(uid in remoteDubs) && uid !== meUid) setPVRef.current(uid, 1);
+      if (!(uid in remoteDubs) && uid !== meUid) restorePVRef.current(uid, false);
     }
     prevDubsRef.current = remoteDubs;
   }, [remoteDubs, meUid]);

@@ -17,6 +17,8 @@ export interface Member {
   avatar: string;
   side: "left" | "right";
   muted: boolean;
+  /** Set by a moderator: this person CANNOT unmute themselves until it is lifted. */
+  forceMuted: boolean;
   /** Moderator-set: this person cannot hear the room until restored. */
   deafened: boolean;
   joinedAt: number;
@@ -79,6 +81,8 @@ export interface SpaceView extends SpaceSummary {
   status: MyStatus;
   members: Member[];
   pending: PendingReq[]; // only filled for owner / moderators
+  /** uid list of removed people (owner only) — they can be allowed back. */
+  banned: string[]; // only filled for the owner
   messages: ChatMsg[]; // only filled for members
   captions: Caption[]; // latest live-translation lines, only filled for members
 }
@@ -89,12 +93,18 @@ interface Hub {
   spaces: Map<string, Space>;
   listeners: Map<string, Map<string, Set<Send>>>; // code -> uid -> senders
   graceTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Relayed WebRTC signals per code:uid, so a dead SSE stream can poll them. */
+  signalLogs: Map<string, { items: { id: number; from: string; payload: unknown }[]; next: number }>;
+  /** Last poll timestamp per code:uid — polling keeps a member alive like SSE. */
+  pollSeen: Map<string, number>;
 }
 const g = globalThis as unknown as { __covaSpaceHub?: Hub };
 const hub: Hub = (g.__covaSpaceHub ??= {
   spaces: new Map(),
   listeners: new Map(),
   graceTimers: new Map(),
+  signalLogs: new Map(),
+  pollSeen: new Map(),
 });
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
@@ -139,9 +149,30 @@ export function viewFor(s: Space, uid: string): SpaceView {
     status,
     members: me ? [...s.members.values()] : [],
     pending: canModerate(me) ? [...s.pending.values()] : [],
+    banned: me?.role === "owner" ? [...s.banned] : [],
     messages: me ? s.messages.slice(-200) : [],
     captions: me ? s.captions.slice(-20) : [],
   };
+}
+
+/**
+ * Cheap fingerprint of the live state, used by the poll fallback: the client
+ * sends back the last signature it saw and the view is only re-sent when the
+ * signature actually changed. Covers member flags (mute/deafen/role), member
+ * count, join requests, bans and the newest caption / chat message.
+ */
+export function spaceSignature(s: Space): string {
+  const flags = [...s.members.values()]
+    .map((m) => `${m.uid.slice(-6)}${m.muted ? 1 : 0}${m.deafened ? 1 : 0}${m.forceMuted ? 1 : 0}${m.role[0]}`)
+    .join(",");
+  return [
+    s.members.size,
+    flags,
+    s.pending.size,
+    s.banned.size,
+    s.captions.at(-1)?.id ?? "",
+    s.messages.at(-1)?.id ?? "",
+  ].join("|");
 }
 
 function push(code: string, uid: string, event: string, data: unknown) {
@@ -263,6 +294,7 @@ export function act(
           avatar,
           side,
           muted: false,
+          forceMuted: false,
           deafened: false,
           joinedAt: Date.now(),
           role: uid === s.ownerUid ? "owner" : "member",
@@ -298,6 +330,7 @@ export function act(
           avatar: req.avatar,
           side: req.side,
           muted: false,
+          forceMuted: false,
           deafened: false,
           joinedAt: Date.now(),
           role: "member",
@@ -315,11 +348,21 @@ export function act(
       return done();
     }
     case "forceMute": {
+      // TOGGLE: value !== false locks the microphone (the target cannot unmute
+      // themselves), value === false lifts the lock and lets them speak again.
       if (!canModerate(me) || !target || target.role === "owner")
         return { ok: false, error: "forbidden" };
       if (me!.role === "mod" && target.role === "mod") return { ok: false, error: "forbidden" };
-      target.muted = true;
-      push(s.code, target.uid, "forceMute", {});
+      target.forceMuted = a.value !== false;
+      target.muted = target.forceMuted;
+      push(s.code, target.uid, "forceMute", { value: target.forceMuted });
+      return done();
+    }
+    case "unban": {
+      // Allow a removed person back into the room.
+      if (!canModerate(me) || !a.target) return { ok: false, error: "forbidden" };
+      s.banned.delete(a.target);
+      s.denied.delete(a.target);
       return done();
     }
     case "deafen": {
@@ -353,6 +396,7 @@ export function act(
           status: "none",
           members: [],
           pending: [],
+          banned: [],
           messages: [],
           captions: [],
         },
@@ -362,7 +406,9 @@ export function act(
       if (!me) return { ok: false, error: "forbidden" };
       if (a.avatar) me.avatar = clean(a.avatar, 30);
       if (a.side) me.side = side;
-      if (typeof a.muted === "boolean") me.muted = a.muted;
+      // A moderator-locked microphone cannot be lifted by the locked person
+      // themselves — only the forceMute toggle (value false) opens it.
+      if (typeof a.muted === "boolean" && !me.forceMuted) me.muted = a.muted;
       return done();
     }
     case "message": {
@@ -398,9 +444,18 @@ export function act(
       return done();
     }
     case "signal": {
-      // WebRTC offer/answer/ICE relay between two members of the same voice room.
+      // WebRTC offer/answer/ICE relay between two members of the same voice
+      // room. Every signal gets a monotonic id and lands in a per-recipient
+      // ring buffer, so a client whose SSE stream is swallowed by a proxy
+      // still receives everything through the /poll fallback.
       if (!me || !a.to || !s.members.has(a.to)) return { ok: false, error: "forbidden" };
-      push(s.code, a.to, "signal", { from: uid, payload: a.payload });
+      const key = `${s.code}:${a.to}`;
+      let log = hub.signalLogs.get(key);
+      if (!log) hub.signalLogs.set(key, (log = { items: [], next: 1 }));
+      const id = log.next++;
+      log.items.push({ id, from: uid, payload: a.payload });
+      if (log.items.length > 100) log.items.splice(0, log.items.length - 100);
+      push(s.code, a.to, "signal", { from: uid, payload: a.payload, id });
       return { ok: true, view: viewFor(s, uid) };
     }
     default:
@@ -430,19 +485,69 @@ export function addListener(codeRaw: string, uid: string, send: Send): (() => vo
     set.delete(send);
     if (set.size > 0) return;
     byUid.delete(uid);
-    // Voice rooms: a dropped connection (closed tab) removes the person after a short grace period.
+    // Voice rooms: a dropped connection (closed tab) removes the person after
+    // a short grace period — UNLESS their poll fallback is still alive.
     if (s.kind === "voice") {
       hub.graceTimers.set(
         timerKey,
         setTimeout(() => {
           hub.graceTimers.delete(timerKey);
           if (hub.listeners.get(code)?.has(uid)) return;
+          if (Date.now() - (hub.pollSeen.get(timerKey) ?? 0) < 8000) return;
           if (s.members.delete(uid) || s.pending.delete(uid)) {
+            hub.pollSeen.delete(timerKey);
+            hub.signalLogs.delete(timerKey);
             if (s.members.size === 0) hub.spaces.delete(code);
             else broadcast(s);
           }
         }, 8000),
       );
     }
+  };
+}
+
+/* ---------- poll fallback (SSE swallowed by a proxy / connection cap) ---------- */
+
+export interface PollResult {
+  /** The room is gone or I am out of it (kicked / closed). */
+  closed: boolean;
+  /** WebRTC signals relayed to me since `since` (oldest first). */
+  signals: { id: number; from: string; payload: unknown }[];
+  /** Monotonic id to pass back as `since` next time. */
+  next: number;
+  /** State fingerprint to pass back as `sig` next time. */
+  sig: string;
+  /** Full view — present ONLY when the signature changed since the last poll. */
+  view: SpaceView | null;
+}
+
+/**
+ * Reliable delivery channel for one member: signals buffered per recipient
+ * plus a state view when its fingerprint changed. Polling every ~400 ms
+ * guarantees that WebRTC negotiation and live captions survive proxies that
+ * swallow Server-Sent Events (Codespaces port forwarding does exactly that,
+ * which killed audio, camera, share, control AND caption updates at once).
+ */
+export function pollSpace(codeRaw: string, uid: string, since: number, sig: string): PollResult | null {
+  const code = normalizeCode(codeRaw);
+  const s = hub.spaces.get(code);
+  if (!s) return null;
+  const me = s.members.get(uid);
+  const waiting = s.pending.has(uid);
+  if (!me && !waiting) return null; // kicked / closed / never joined
+
+  const timerKey = `${code}:${uid}`;
+  hub.pollSeen.set(timerKey, Date.now());
+
+  const log = hub.signalLogs.get(timerKey);
+  const items = (log?.items ?? []).filter((i) => i.id > since).slice(-200);
+  const next = items.length ? items.at(-1)!.id : since;
+  const currentSig = spaceSignature(s);
+  return {
+    closed: false,
+    signals: items,
+    next,
+    sig: currentSig,
+    view: currentSig !== sig ? viewFor(s, uid) : null,
   };
 }

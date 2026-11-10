@@ -352,6 +352,7 @@ export function VoiceRoom({ code }: { code: string }) {
             send={runtime.send}
             expanded={captionsOpen}
             setPeerVolume={runtime.setPeerVolume}
+            restorePeerVolume={runtime.restorePeerVolume}
             remoteDubs={runtime.remoteDubs}
             onDubChange={(on, lang) => {
               setDub({ on, lang });
@@ -369,6 +370,8 @@ export function VoiceRoom({ code }: { code: string }) {
             meUid={uid}
             deafened={runtime.deafened}
             send={runtime.send}
+            volumes={runtime.volumes}
+            setUserVolume={runtime.setUserVolume}
           />
         </div>
       </div>

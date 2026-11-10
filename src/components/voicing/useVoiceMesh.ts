@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Signal } from "@/lib/spaces-client";
+import { resolveRestoreVolume } from "./dubModel";
 import {
   ctlVerifyDecision,
   injectKey,
@@ -13,45 +14,49 @@ import {
 /**
  * Full-mesh WebRTC audio for voice rooms, hardened for cross-device calls:
  *
- * - Perfect negotiation (polite = larger uid): both sides may offer, glare is
- *   resolved with rollback. Fixes PC<->phone calls where the second side's
- *   microphone arrived after the first answer and could never be renegotiated.
+ * - DETERMINISTIC negotiation (the larger uid offers once with placeholder
+ *   senders on audio/screen/camera m-lines; the answerer fills them with
+ *   addTrack) — perfect negotiation deadlocked real browsers.
+ * - ICE servers come from /api/ice (env-configurable TURN) because the old
+ *   hardcoded openrelay TURN service is dead — cross-network calls had NO
+ *   relay at all and stayed silent forever.
+ * - ICE-RESTART recovery: if a connection fails or stays disconnected, the
+ *   offerer re-offers with iceRestart automatically (offerer only, so there
+ *   is never a glare) — Wi-Fi/cellular switches and dead relays heal without
+ *   anyone touching anything.
+ * - Signalling rides the SSE stream AND a poll fallback (/poll) — a proxy
+ *   that swallows event-streams can no longer break negotiation.
  * - Audio AND video transceivers are pre-created sendrecv, so a late mic
  *   (permission prompt on phones) or a screen share reuses the same m-lines.
- * - Free public TURN relays: PC on home Wi-Fi <-> phone on cellular now
- *   connects even when STUN cannot punch through a symmetric NAT.
  * - Remote audio elements live in the DOM with playsinline and are unlocked
  *   on the join tap + on the next tap anywhere — mobile browsers only allow
  *   playback after a user gesture.
  * - The microphone can be re-requested (retryMic) if the first ask failed.
- *
- * Extras: moderator deafen (all incoming volumes to zero), per-peer volume
- * (dubbing ducks a speaker's raw microphone while their translated voice
- * plays), screen sharing through the same peer connections and a per-pair
- * data channel carrying the remote-control handshake + input events.
+ * - Per-listener volume: setUserVolume(uid, v) changes how loud ONE person is
+ *   FOR ME only (persisted per browser); dubbing ducks temporarily and
+ *   restores to my chosen level, never to a fixed default.
  */
 
-const ICE: RTCConfiguration = {
-  iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-  ],
-  iceCandidatePoolSize: 4,
-};
+const DEFAULT_ICE: RTCIceServer[] = [
+  { urls: ["stun:stun.l.google.com:19302", "stun:global.stun.twilio.com:3478"] },
+];
+
+const VOL_KEY = "cova-peer-vol";
+
+/** Persisted per-listener volumes (uid -> 0..1), shared across rooms/sessions. */
+function readSavedVolumes(): Map<string, number> {
+  try {
+    const raw = window.localStorage.getItem(VOL_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const m = new Map<string, number>();
+    for (const [k, v] of Object.entries(obj))
+      if (typeof v === "number" && v >= 0 && v <= 1) m.set(k, v);
+    return m;
+  } catch {
+    return new Map();
+  }
+}
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -167,6 +172,8 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
   const [remoteCams, setRemoteCams] = useState<Record<string, MediaStream>>({});
   const [remoteCamFacing, setRemoteCamFacing] = useState<Record<string, "user" | "environment">>({});
   const [ctl, setCtl] = useState<RoomVoiceCtl>(EMPTY_CTL);
+  /** Reactive mirror of userVolumes — drives the per-person volume sliders. */
+  const [volumes, setVolumes] = useState<Record<string, number>>({});
 
   const stream = useRef<MediaStream | null>(null);
   const ctx = useRef<AudioContext | null>(null);
@@ -181,10 +188,32 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
   const dubRef = useRef({ on: false, lang: "" });
   const sendRef = useRef(sendSignal);
   const meRef = useRef(meUid);
+  /** Live ICE config (STUN always; TURN when COVA_TURN_* env vars are set). */
+  const iceRef = useRef<RTCIceServer[]>(DEFAULT_ICE);
+  /** My chosen loudness per peer ("for me only"), persisted across sessions. */
+  const userVolumes = useRef<Map<string, number>>(new Map());
+  /** ICE-restart bookkeeping per peer uid. */
+  const iceRestarts = useRef(new Map<string, number>());
+  const iceRetryTimers = useRef(new Map<string, number>());
   useEffect(() => {
     sendRef.current = sendSignal;
     meRef.current = meUid;
   });
+
+  useEffect(() => {
+    if (!enabled) return;
+    const saved = readSavedVolumes();
+    userVolumes.current = saved;
+    const obj: Record<string, number> = {};
+    saved.forEach((v, k) => (obj[k] = v));
+    setVolumes(obj);
+    fetch("/api/ice")
+      .then((r) => r.json())
+      .then((d: { iceServers?: RTCIceServer[] }) => {
+        if (Array.isArray(d?.iceServers) && d.iceServers.length) iceRef.current = d.iceServers;
+      })
+      .catch(() => undefined);
+  }, [enabled]);
 
   const patchCtl = useCallback((part: Partial<RoomVoiceCtl>) => {
     ctlRef.current = { ...ctlRef.current, ...part };
@@ -303,6 +332,33 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       applyVolume(p);
     },
     [applyVolume],
+  );
+
+  /** Change how loud ONE person is FOR ME only (the volume slider). */
+  const setUserVolume = useCallback(
+    (uid: string, v: number) => {
+      const vol = Math.min(1, Math.max(0, v));
+      userVolumes.current.set(uid, vol);
+      setVolumes((prev) => (prev[uid] === vol ? prev : { ...prev, [uid]: vol }));
+      try {
+        const obj: Record<string, number> = {};
+        userVolumes.current.forEach((val, k) => (obj[k] = val));
+        window.localStorage.setItem(VOL_KEY, JSON.stringify(obj));
+      } catch {
+        /* storage unavailable */
+      }
+      setPeerVolume(uid, vol);
+    },
+    [setPeerVolume],
+  );
+
+  /** End of a duck: back to my chosen level, or stay whisper-low while their
+      dubbing is still running (the room hears the translation, not the mic). */
+  const restorePeerVolume = useCallback(
+    (uid: string, stillDubbing: boolean) => {
+      setPeerVolume(uid, resolveRestoreVolume(stillDubbing, userVolumes.current.get(uid)));
+    },
+    [setPeerVolume],
   );
 
   /** Unlocks audio playback on phones: must run inside a user gesture. */
@@ -580,7 +636,10 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       const existing = peers.current.get(uid);
       if (existing) return existing;
 
-      const pc = new RTCPeerConnection(ICE);
+      const pc = new RTCPeerConnection({
+        iceServers: iceRef.current,
+        iceCandidatePoolSize: 4,
+      });
       const audio = document.createElement("audio");
       audio.autoplay = true;
       audio.setAttribute("playsinline", "true");
@@ -610,6 +669,10 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         closed: false,
       };
       peers.current.set(uid, peer);
+      applyVolume(peer);
+      // Start at MY chosen loudness for this person (slider persistence).
+      const saved = userVolumes.current.get(uid);
+      if (saved !== undefined) peer.baseVolume = saved;
       applyVolume(peer);
 
       /* ---------------- DETERMINISTIC NEGOTIATION ----------------
@@ -695,13 +758,44 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") {
-          try {
-            pc.restartIce();
-          } catch {
-            /* older browsers */
+        if (pc.connectionState === "connected") {
+          iceRestarts.current.set(uid, 0);
+          const t = iceRetryTimers.current.get(uid);
+          if (t) {
+            window.clearTimeout(t);
+            iceRetryTimers.current.delete(uid);
           }
+          return;
         }
+        if (!isOfferer || peer.closed) return;
+        // Dead connection -> the OFFERER re-offers with iceRestart (offerer
+        // only, so the pair can never glare). Covers Wi-Fi <-> cellular
+        // switches, a dying relay, and the first offer's ICE race.
+        const failed = pc.connectionState === "failed";
+        const disconnected = pc.connectionState === "disconnected";
+        if (!failed && !disconnected) return;
+        const attempt = (iceRestarts.current.get(uid) ?? 0) + 1;
+        if (attempt > 8) return;
+        const prev = iceRetryTimers.current.get(uid);
+        if (prev) window.clearTimeout(prev);
+        const delay = failed ? 1200 : 8000; // disconnected may self-heal first
+        const timer = window.setTimeout(() => {
+          iceRetryTimers.current.delete(uid);
+          if (peer.closed || pc.connectionState === "connected") return;
+          iceRestarts.current.set(uid, attempt);
+          void (async () => {
+            try {
+              const offer = await pc.createOffer({ iceRestart: true });
+              if (peer.closed) return;
+              await pc.setLocalDescription(offer);
+              if (pc.localDescription && !peer.closed)
+                sendRef.current(uid, { kind: "sdp", description: pc.localDescription });
+            } catch {
+              /* next attempt retries */
+            }
+          })();
+        }, delay);
+        iceRetryTimers.current.set(uid, timer);
       };
 
       // BOTH sides create the control channel is NOT needed: the offerer's
@@ -794,6 +888,9 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
         p.audio.remove();
       });
       peerMap.clear();
+      iceRetryTimers.current.forEach((t) => window.clearTimeout(t));
+      iceRetryTimers.current.clear();
+      iceRestarts.current.clear();
       // The shared placeholder tracks (mute audio / black video) die with the
       // room; a fresh session builds new ones.
       silence.current.audio?.stop();
@@ -1194,6 +1291,9 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     deafened,
     setDeafened,
     setPeerVolume,
+    setUserVolume,
+    restorePeerVolume,
+    volumes,
     unlock,
     sharing,
     toggleShare,

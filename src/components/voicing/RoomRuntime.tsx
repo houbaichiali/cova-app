@@ -92,6 +92,11 @@ interface RoomRuntimeValue {
   ctlActions: RoomVoiceCtlActions;
   /** Duck one peer's raw audio (used by the dubbing engine). */
   setPeerVolume: (uid: string, v: number) => void;
+  /** End a duck: back to MY chosen loudness for that person. */
+  restorePeerVolume: (uid: string, stillDubbing: boolean) => void;
+  /** Per-person volume slider (FOR ME only) + its current values. */
+  setUserVolume: (uid: string, v: number) => void;
+  volumes: Record<string, number>;
 }
 
 const RoomRuntimeContext = createContext<RoomRuntimeValue | null>(null);
@@ -149,6 +154,9 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
     deafened,
     setDeafened,
     setPeerVolume,
+    setUserVolume,
+    restorePeerVolume,
+    volumes,
     unlock,
     sharing,
     toggleShare,
@@ -254,6 +262,9 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
       ctl,
       ctlActions,
       setPeerVolume,
+      restorePeerVolume,
+      setUserVolume,
+      volumes,
     }),
     [
       code,
@@ -287,6 +298,9 @@ export function RoomRuntimeProvider({ children }: { children: ReactNode }) {
       ctl,
       ctlActions,
       setPeerVolume,
+      restorePeerVolume,
+      setUserVolume,
+      volumes,
     ],
   );
 

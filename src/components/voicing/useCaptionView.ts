@@ -90,18 +90,31 @@ const translated = new Map<string, string>();
 const requested = new Set<string>();
 
 /**
- * Latest spoken line per uid, in the viewer's chosen language. Used for the
- * speech bubbles rendered under each 3D character.
+ * Latest spoken line per uid, in the viewer's chosen language, with its
+ * timestamp. Used for the speech bubbles rendered under each 3D character —
+ * every new line REPLACES the old one (never stuck on the first sentence)
+ * and the bubble disappears on its own after a few seconds (BUBBLE_TTL).
  */
-export function useCaptionView(captions: Caption[], meUid: string): Record<string, string> {
+export interface BubbleLine {
+  text: string;
+  /** Caption timestamp (ms epoch) — the renderer decides visibility. */
+  at: number;
+}
+export const BUBBLE_TTL = 7000;
+
+export function bubbleVisible(at: number, now: number, ttl: number = BUBBLE_TTL): boolean {
+  return now - at < ttl;
+}
+
+export function useCaptionView(captions: Caption[], meUid: string): Record<string, BubbleLine> {
   const { locale } = useI18n();
   const [targetCode] = useTargetLang();
   const effective = targetCode || locale;
-  const [lines, setLines] = useState<Record<string, string>>({});
+  const [lines, setLines] = useState<Record<string, BubbleLine>>({});
   const sigRef = useRef("");
 
   const recompute = useCallback(() => {
-    const next: Record<string, string> = {};
+    const next: Record<string, BubbleLine> = {};
     const seen = new Set<string>();
     for (let i = captions.length - 1; i >= 0; i--) {
       const c = captions[i]!;
@@ -117,10 +130,13 @@ export function useCaptionView(captions: Caption[], meUid: string): Record<strin
           : dubMatches
             ? c.tt!
             : (translated.get(key) ?? c.text);
-      next[c.uid] = text.length > 120 ? `${text.slice(0, 117)}…` : text;
+      next[c.uid] = {
+        text: text.length > 120 ? `${text.slice(0, 117)}…` : text,
+        at: c.at,
+      };
     }
     const sig = Object.entries(next)
-      .map(([k, v]) => `${k}:${v}`)
+      .map(([k, v]) => `${k}:${v.text}@${v.at}`)
       .join("|");
     if (sig !== sigRef.current) {
       sigRef.current = sig;

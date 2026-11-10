@@ -70,6 +70,8 @@ export function roomPath(kind: SpaceKind, code: string): string {
 export interface Signal {
   from: string;
   payload: unknown;
+  /** Monotonic relay id — the poll fallback and SSE may deliver it twice. */
+  id?: number;
 }
 export type SpaceEnd = "kicked" | "closed" | null;
 
@@ -82,6 +84,21 @@ export function useSpace(code: string, uid: string) {
   const signalSubs = useRef(new Set<(s: Signal) => void>());
   const muteSubs = useRef(new Set<() => void>());
   const deafSubs = useRef(new Set<(value: boolean) => void>());
+  /** Relay ids already dispatched — SSE and the poll fallback overlap. */
+  const seenSignals = useRef(new Set<number>());
+  const sinceRef = useRef(0);
+  const sigRef = useRef("");
+  const dispatchSignal = useCallback((s: Signal) => {
+    if (typeof s.id === "number") {
+      if (seenSignals.current.has(s.id)) return;
+      seenSignals.current.add(s.id);
+      if (seenSignals.current.size > 500) {
+        const it = seenSignals.current.values().next();
+        if (!it.done) seenSignals.current.delete(it.value);
+      }
+    }
+    signalSubs.current.forEach((fn) => fn(s));
+  }, []);
   const onSignal = useCallback((fn: (s: Signal) => void) => {
     signalSubs.current.add(fn);
     return () => void signalSubs.current.delete(fn);
@@ -103,6 +120,9 @@ export function useSpace(code: string, uid: string) {
     setView(null);
     setNotFound(false);
     setEnded(null);
+    seenSignals.current = new Set();
+    sinceRef.current = 0;
+    sigRef.current = "";
   }
 
   // First load (works for people who are not in the space yet).
@@ -133,9 +153,7 @@ export function useSpace(code: string, uid: string) {
       setView(JSON.parse((e as MessageEvent<string>).data) as SpaceView),
     );
     es.addEventListener("signal", (e) =>
-      signalSubs.current.forEach((fn) =>
-        fn(JSON.parse((e as MessageEvent<string>).data) as Signal),
-      ),
+      dispatchSignal(JSON.parse((e as MessageEvent<string>).data) as Signal),
     );
     es.addEventListener("forceMute", () => muteSubs.current.forEach((fn) => fn()));
     es.addEventListener("deafenState", (e) => {
@@ -160,6 +178,47 @@ export function useSpace(code: string, uid: string) {
       setLive(false);
     };
   }, [code, uid, wantsLive]);
+
+  // POLL FALLBACK — the lifeline when the SSE stream dies behind a proxy
+  // (Codespaces port forwarding swallows event-streams, which killed WebRTC
+  // negotiation AND live captions at once). Every 400 ms: pick up relayed
+  // signals from the server's ring buffer and refresh the view when its
+  // fingerprint changed. Polling also keeps the member alive server-side.
+  useEffect(() => {
+    if (!uid || !wantsLive) return;
+    let dead = false;
+    const tick = async () => {
+      try {
+        const q = `uid=${encodeURIComponent(uid)}&since=${sinceRef.current}&sig=${encodeURIComponent(sigRef.current)}`;
+        const res = await fetch(`/api/spaces/${code}/poll?${q}`, { cache: "no-store" });
+        const d = (await res.json()) as {
+          ok?: boolean;
+          closed?: boolean;
+          signals?: Signal[];
+          next?: number;
+          sig?: string;
+          view?: SpaceView | null;
+        };
+        if (dead) return;
+        if (d.closed) {
+          setEnded("closed");
+          return;
+        }
+        if (typeof d.next === "number") sinceRef.current = d.next;
+        if (typeof d.sig === "string") sigRef.current = d.sig;
+        for (const s of d.signals ?? []) dispatchSignal(s);
+        if (d.view) setView(d.view);
+      } catch {
+        /* network hiccup — the next tick retries */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 400);
+    return () => {
+      dead = true;
+      window.clearInterval(id);
+    };
+  }, [code, uid, wantsLive, dispatchSignal]);
 
   const send = useCallback(
     async (body: Record<string, unknown>) => {

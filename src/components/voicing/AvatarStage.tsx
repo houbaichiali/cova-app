@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { getAvatar, type AvatarDef } from "@/components/voicing/avatars";
 import { buildProcedural } from "@/components/voicing/characterModel";
+import { bubbleVisible, type BubbleLine } from "@/components/voicing/useCaptionView";
 
 export interface StageMember {
   uid: string;
@@ -24,7 +25,7 @@ interface Props {
   /** 0..1 loudness of a participant right now (read every frame). */
   getLevel: (uid: string) => number;
   /** uid -> latest spoken line (translated into the viewer's language). */
-  bubbles?: Record<string, string>;
+  bubbles?: Record<string, BubbleLine>;
   className?: string;
 }
 
@@ -333,9 +334,11 @@ export function AvatarStage({ members, meUid, getLevel, bubbles, className }: Pr
         a.label.style.left = `${(tmp.x * 0.5 + 0.5) * w}px`;
         a.label.style.top = `${(-tmp.y * 0.5 + 0.5) * h + 2}px`;
 
-        const line = bubblesRef.current?.[a.uid] ?? "";
-        if (line) {
-          a.bubble.textContent = line;
+        const line = bubblesRef.current?.[a.uid];
+        if (line && bubbleVisible(line.at, Date.now())) {
+          // Every new line replaces the old one; the bubble hides itself when
+          // its few seconds are up — never stuck on the first sentence.
+          a.bubble.textContent = line.text;
           a.bubble.style.display = "block";
           tmp
             .copy(a.group.position)
@@ -419,16 +422,21 @@ function FlatMember({
 }: {
   m: StageMember;
   isMe: boolean;
-  bubbles?: Record<string, string>;
+  bubbles?: Record<string, BubbleLine>;
   getLevel: (uid: string) => number;
 }) {
   const def = getAvatar(m.avatar);
   const accentCss = `#${def.accent.toString(16).padStart(6, "0")}`;
   const [level, setLevel] = useState(0);
+  const [bubble, setBubble] = useState<string | null>(null);
   useEffect(() => {
-    const id = window.setInterval(() => setLevel(getLevel(m.uid)), 120);
+    const id = window.setInterval(() => {
+      setLevel(getLevel(m.uid));
+      const line = bubbles?.[m.uid];
+      setBubble(line && bubbleVisible(line.at, Date.now()) ? line.text : null);
+    }, 120);
     return () => window.clearInterval(id);
-  }, [m.uid, getLevel]);
+  }, [m.uid, getLevel, bubbles]);
   const speaking = level > 0.08;
   const crown = m.role === "owner" ? "👑 " : m.role === "mod" ? "🛡 " : "";
   const flags = `${m.muted ? " 🔇" : ""}${m.deafened ? " 🙉" : ""}`;
@@ -451,9 +459,9 @@ function FlatMember({
         {isMe ? " •" : ""}
         {flags}
       </p>
-      {bubbles?.[m.uid] && (
+      {bubble && (
         <p className="max-w-28 rounded-xl bg-cova-ink/90 px-2 py-1 text-center text-[11px] leading-snug text-white shadow-md">
-          {bubbles[m.uid]}
+          {bubble}
         </p>
       )}
     </div>
