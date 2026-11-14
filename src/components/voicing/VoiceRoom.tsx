@@ -26,7 +26,7 @@ import { useCaptionView } from "@/components/voicing/useCaptionView";
 import { readSavedAvatar, readSavedSide } from "@/components/voicing/avatars";
 import { useS } from "@/i18n/spaces";
 import { findLang } from "@/lib/langs";
-import { api, type SpaceView } from "@/lib/spaces-client";
+import { api, getRoomToken, type SpaceView } from "@/lib/spaces-client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -65,8 +65,10 @@ export function VoiceRoom({ code }: { code: string }) {
       switchRef.current = code;
       void (async () => {
         // Check the target room exists; private rooms go through the form.
+        // The room token rides along: a member without it only sees the
+        // public summary (which then re-triggers the join flow).
         const r = await api<{ space?: SpaceView }>(
-          `/api/spaces/${code}?uid=${encodeURIComponent(runtime.uid)}`,
+          `/api/spaces/${code}?uid=${encodeURIComponent(runtime.uid)}&t=${encodeURIComponent(getRoomToken(code))}`,
         ).catch(() => null);
         if (!r?.ok || !r.data.space) {
           setMissing(true);

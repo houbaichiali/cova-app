@@ -6,7 +6,11 @@ export const runtime = "nodejs";
 /** Server-Sent Events stream: live state, WebRTC signals, kicks and closures for one person. */
 export async function GET(req: Request, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
-  const uid = new URL(req.url).searchParams.get("uid") ?? "";
+  const url = new URL(req.url);
+  const uid = url.searchParams.get("uid") ?? "";
+  // Room token: a member's live stream is member-only data (state, WebRTC
+  // signals, captions) — a bare uid claim gets no stream at all.
+  const token = url.searchParams.get("t") ?? "";
   const enc = new TextEncoder();
   let cleanup: (() => void) | null = null;
   let ping: ReturnType<typeof setInterval> | undefined;
@@ -20,7 +24,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
           /* stream already closed */
         }
       };
-      cleanup = addListener(code, uid, send);
+      cleanup = addListener(code, uid, send, token);
       if (!cleanup) {
         send("closed", {});
         controller.close();

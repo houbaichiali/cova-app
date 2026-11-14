@@ -4,16 +4,67 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { demoActions, useDemoState } from "@/lib/demo-store";
 import { useMe } from "@/lib/social-store";
 import { currentUser as demoCurrentUser } from "@/data/students";
+import { getSupabase } from "@/lib/supabase/client";
 import type { Member, MyStatus, SpaceKind, SpaceSummary, SpaceView } from "@/server/spaces-store";
 
 export type { Member, MyStatus, SpaceKind, SpaceSummary, SpaceView };
 
 const UID_KEY = "cova-uid";
 
+/* ------------------------- room identity tokens ------------------------- */
+
+const RT_PREFIX = "cova-rt-";
+
 /**
- * Who am I for the server. Signed-in account -> stable id derived from the email, so the
- * same account is the same person in every tab. Guests get a random per-browser id.
- * DEMO LEVEL: no real authentication yet.
+ * The signed room token the server issued for THIS browser in THIS room.
+ * The server refuses member actions, views, streams and polls without it —
+ * see src/server/room-token.ts. Stored per room in localStorage so a page
+ * refresh (and a second tab) keeps the same proof.
+ */
+export function getRoomToken(code: string): string {
+  try {
+    return window.localStorage.getItem(RT_PREFIX + code) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function setRoomToken(code: string, token: unknown): void {
+  if (typeof token !== "string" || !token) return;
+  try {
+    window.localStorage.setItem(RT_PREFIX + code, token);
+  } catch {
+    /* private mode — tokens stay session-only */
+  }
+}
+
+export function clearRoomToken(code: string): void {
+  try {
+    window.localStorage.removeItem(RT_PREFIX + code);
+  } catch {
+    /* nothing to clean */
+  }
+}
+
+/**
+ * Supabase access token for signed-in accounts (server forces their uid from
+ * it). Guests silently send nothing — the room token alone is their proof.
+ */
+async function bearerHeaders(): Promise<Record<string, string>> {
+  try {
+    const session = (await getSupabase().auth.getSession()).data.session;
+    const token = session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {}; // Supabase not configured — rooms work in token mode
+  }
+}
+
+/**
+ * Who am I for the server. Signed-in account -> `u-<profile id>`; the server
+ * verifies the matching Supabase access token on every action and FORCES this
+ * uid from it, so a known email no longer grants anyone a room identity.
+ * Guests get a random per-browser id plus a signed room token at join.
  */
 let guestUid = "";
 function readGuestUid(): string {
@@ -125,17 +176,21 @@ export function useSpace(code: string, uid: string) {
     sigRef.current = "";
   }
 
-  // First load (works for people who are not in the space yet).
+  // First load (works for people who are not in the space yet). A member
+  // without their token only ever sees the public summary — which then makes
+  // the runtime join again and re-prove itself.
   useEffect(() => {
     if (!uid || !code) return;
     let cancelled = false;
-    void api<{ space?: SpaceView }>(`/api/spaces/${code}?uid=${encodeURIComponent(uid)}`).then(
-      (r) => {
-        if (cancelled) return;
-        if (r.ok && r.data.space) setView(r.data.space);
-        else setNotFound(true);
-      },
-    );
+    void api<{ space?: SpaceView; token?: string }>(
+      `/api/spaces/${code}?uid=${encodeURIComponent(uid)}&t=${encodeURIComponent(getRoomToken(code))}`,
+    ).then((r) => {
+      if (cancelled) return;
+      if (r.ok && r.data.space) {
+        setRoomToken(code, r.data.token);
+        setView(r.data.space);
+      } else setNotFound(true);
+    });
     return () => {
       cancelled = true;
     };
@@ -147,7 +202,9 @@ export function useSpace(code: string, uid: string) {
     status === "owner" || status === "mod" || status === "member" || status === "pending";
   useEffect(() => {
     if (!uid || !wantsLive) return;
-    const es = new EventSource(`/api/spaces/${code}/events?uid=${encodeURIComponent(uid)}`);
+    const es = new EventSource(
+      `/api/spaces/${code}/events?uid=${encodeURIComponent(uid)}&t=${encodeURIComponent(getRoomToken(code))}`,
+    );
     es.onopen = () => setLive(true);
     es.addEventListener("state", (e) =>
       setView(JSON.parse((e as MessageEvent<string>).data) as SpaceView),
@@ -189,7 +246,7 @@ export function useSpace(code: string, uid: string) {
     let dead = false;
     const tick = async () => {
       try {
-        const q = `uid=${encodeURIComponent(uid)}&since=${sinceRef.current}&sig=${encodeURIComponent(sigRef.current)}`;
+        const q = `uid=${encodeURIComponent(uid)}&since=${sinceRef.current}&sig=${encodeURIComponent(sigRef.current)}&t=${encodeURIComponent(getRoomToken(code))}`;
         const res = await fetch(`/api/spaces/${code}/poll?${q}`, { cache: "no-store" });
         const d = (await res.json()) as {
           ok?: boolean;
@@ -222,11 +279,20 @@ export function useSpace(code: string, uid: string) {
 
   const send = useCallback(
     async (body: Record<string, unknown>) => {
-      const r = await api<{ space?: SpaceView; error?: string }>(`/api/spaces/${code}`, {
-        method: "POST",
-        body: JSON.stringify({ uid, ...body }),
-      });
-      if (r.ok && r.data.space) setView(r.data.space);
+      const auth = await bearerHeaders();
+      const r = await api<{ space?: SpaceView; token?: string; error?: string }>(
+        `/api/spaces/${code}`,
+        {
+          method: "POST",
+          headers: auth,
+          body: JSON.stringify({ uid, t: getRoomToken(code), ...body }),
+        },
+      );
+      if (r.ok && r.data.space) {
+        // Every successful action returns a fresh token — keep it current.
+        setRoomToken(code, r.data.token);
+        setView(r.data.space);
+      }
       return r;
     },
     [code, uid],

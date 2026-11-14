@@ -20,7 +20,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
   const uid = url.searchParams.get("uid") ?? "";
   const since = Number(url.searchParams.get("since") ?? "0") || 0;
   const sig = url.searchParams.get("sig") ?? "";
-  const result = pollSpace(code, uid, since, sig);
+  // Room token — the poll endpoint delivers WebRTC signals and member views,
+  // both member-only data. Without a valid token: closed (client re-joins).
+  const token = url.searchParams.get("t") ?? "";
+  const result = pollSpace(code, uid, since, sig, token);
   if (!result) {
     // The room is gone, or I was removed / never made it in.
     return Response.json({ ok: true, closed: true });

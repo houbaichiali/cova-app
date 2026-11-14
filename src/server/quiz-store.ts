@@ -200,6 +200,13 @@ function broadcast(session: Session): void {
   }
 }
 
+/** SSE gate: only the host or a joined player may listen to a session. */
+export function isSessionMember(pin: string, uid: string): boolean {
+  const session = sessions.get(pin);
+  if (!session) return false;
+  return session.hostUserId === uid || session.players.has(uid);
+}
+
 /** Live SSE hookup for one viewer; returns a cleanup or null when gone. */
 export function addListener(
   pin: string,

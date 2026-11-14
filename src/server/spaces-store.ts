@@ -2,9 +2,18 @@
  * In-memory hub for Voicing rooms (kind "voice") and group chats (kind "group").
  *
  * DEV / SINGLE-SERVER ONLY: state lives in the Node process and is lost on restart.
- * Identity (`uid`) is claimed by the client — there is no real auth yet. When the real
- * backend exists, replace this file with database + authenticated sessions.
+ *
+ * IDENTITY IS NOW SERVER-ENFORCED (security round):
+ *  - every person receives a signed room token (HMAC, src/server/room-token.ts)
+ *    on join/create; every action, poll, SSE stream and member view must carry
+ *    the token bound to the SAME code + uid — a claimed uid alone is worthless;
+ *  - signed-in accounts additionally have their uid FORCED from their verified
+ *    Supabase bearer token (`u-<auth.uid>`), so a known email grants nothing;
+ *  - WebRTC signal payloads are size-capped and message/caption/signal/join
+ *    floods are throttled per person.
  */
+
+import { issueRoomToken, verifyRoomToken } from "./room-token";
 
 export type SpaceKind = "voice" | "group";
 export type SpaceRole = "owner" | "mod" | "member";
@@ -97,6 +106,8 @@ interface Hub {
   signalLogs: Map<string, { items: { id: number; from: string; payload: unknown }[]; next: number }>;
   /** Last poll timestamp per code:uid — polling keeps a member alive like SSE. */
   pollSeen: Map<string, number>;
+  /** Per person + action recent timestamps — flood throttle. */
+  flood: Map<string, number[]>;
 }
 const g = globalThis as unknown as { __covaSpaceHub?: Hub };
 const hub: Hub = (g.__covaSpaceHub ??= {
@@ -105,6 +116,7 @@ const hub: Hub = (g.__covaSpaceHub ??= {
   graceTimers: new Map(),
   signalLogs: new Map(),
   pollSeen: new Map(),
+  flood: new Map(),
 });
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L
@@ -122,6 +134,24 @@ export const normalizeCode = (c: string) =>
     .replace(/[^A-Z0-9]/g, "");
 const clean = (s: unknown, max: number) => (typeof s === "string" ? s.trim().slice(0, max) : "");
 const canModerate = (m?: Member) => m?.role === "owner" || m?.role === "mod";
+
+/** Safety caps (exported for the security logic tests). */
+export const SIGNAL_MAX_BYTES = 20_000; // SDP + ICE comfortably fits; abuse does not
+export const ROOM_CAP = 200; // in-memory rooms per process
+
+/** Sliding per-minute flood gate for one person + action kind. */
+function flooded(code: string, uid: string, kind: string, max: number): boolean {
+  const key = `${code}:${uid}:${kind}`;
+  const now = Date.now();
+  if (hub.flood.size > 10_000) hub.flood.clear();
+  let arr = hub.flood.get(key);
+  if (!arr) hub.flood.set(key, (arr = []));
+  arr = arr.filter((t) => now - t < 60_000);
+  hub.flood.set(key, arr);
+  if (arr.length >= max) return true;
+  arr.push(now);
+  return false;
+}
 
 function summary(s: Space): SpaceSummary {
   return {
@@ -208,9 +238,24 @@ export function listSpaces(opts: {
     .slice(0, 50);
 }
 
-export function getView(code: string, uid: string): SpaceView | null {
+export function getView(code: string, uid: string, token?: string): SpaceView | null {
   const s = hub.spaces.get(normalizeCode(code));
-  return s ? viewFor(s, uid) : null;
+  if (!s) return null;
+  const known = !!uid && (s.members.has(uid) || s.pending.has(uid));
+  if (known && !verifyRoomToken(token, s.code, uid)) {
+    // Claiming a member's uid without the room token reveals NOTHING —
+    // no members, no messages, no captions. The lobby summary stays public.
+    return {
+      ...summary(s),
+      status: "none",
+      members: [],
+      pending: [],
+      banned: [],
+      messages: [],
+      captions: [],
+    };
+  }
+  return viewFor(s, uid);
 }
 
 /* ---------- mutations ---------- */
@@ -220,10 +265,11 @@ export function createSpace(input: {
   description?: string;
   isPublic: boolean;
   ownerUid: string;
-}): SpaceSummary | { error: string } {
+}): (SpaceSummary & { token: string }) | { error: string } {
   const name = clean(input.name, 60);
   if (name.length < 2) return { error: "name_too_short" };
   if (!input.ownerUid) return { error: "no_uid" };
+  if (hub.spaces.size >= ROOM_CAP) return { error: "too_many_spaces" };
   const s: Space = {
     code: newCode(),
     kind: input.kind,
@@ -240,12 +286,14 @@ export function createSpace(input: {
     captions: [],
   };
   hub.spaces.set(s.code, s);
-  return summary(s);
+  return { ...summary(s), token: issueRoomToken(s.code, input.ownerUid) };
 }
 
 export interface ActionInput {
   type: string;
   uid: string;
+  /** Signed room token (rt1…) issued at join/create — proves this identity. */
+  t?: string;
   name?: string;
   avatar?: string;
   side?: string;
@@ -268,21 +316,36 @@ export interface ActionInput {
 export function act(
   codeRaw: string,
   a: ActionInput,
-): { ok: true; view: SpaceView } | { ok: false; error: string } {
+  bearerUid?: string | null,
+): { ok: true; view: SpaceView; token?: string } | { ok: false; error: string } {
   const s = hub.spaces.get(normalizeCode(codeRaw));
   if (!s) return { ok: false, error: "not_found" };
   const uid = clean(a.uid, 80);
   if (!uid) return { ok: false, error: "no_uid" };
+  // Signed-in identity is FORCED from the verified bearer token — the browser
+  // cannot claim another person's uid (the old email-derived takeover).
+  if (bearerUid && uid !== bearerUid) return { ok: false, error: "uid_mismatch" };
   const me = s.members.get(uid);
+  const waiting = s.pending.has(uid);
+  // Whoever is already in the room (member or waiting) must present the room
+  // token issued at join — UNLESS they carry a verified Supabase identity that
+  // matches the uid (two devices, same signed-in account: the bearer is the
+  // stronger proof and re-issues a fresh token). A bare uid claim from a fresh
+  // browser is refused.
+  if ((me || waiting) && bearerUid !== uid && !verifyRoomToken(a.t, s.code, uid)) {
+    return { ok: false, error: a.type === "join" ? "uid_taken" : "no_token" };
+  }
   const side = a.side === "right" ? "right" : "left";
   const done = () => {
     broadcast(s);
-    return { ok: true as const, view: viewFor(s, uid) };
+    // Fresh token on every success: honest clients never expire mid-session.
+    return { ok: true as const, view: viewFor(s, uid), token: issueRoomToken(s.code, uid) };
   };
   const target = a.target ? s.members.get(a.target) : undefined;
 
   switch (a.type) {
     case "join": {
+      if (flooded(s.code, uid, "join", 8)) return { ok: false, error: "rate_limited" };
       if (me) return done();
       if (s.banned.has(uid)) return { ok: false, error: "banned" };
       const name = clean(a.name, 40) || "Guest";
@@ -414,6 +477,7 @@ export function act(
     case "message": {
       const text = clean(a.text, 1000);
       if (!me || !text) return { ok: false, error: "forbidden" };
+      if (flooded(s.code, uid, "message", 20)) return { ok: false, error: "rate_limited" };
       s.messages.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         uid,
@@ -427,6 +491,7 @@ export function act(
     case "caption": {
       // Live-translation line from a member of a voice room, relayed to everyone.
       if (!me || s.kind !== "voice") return { ok: false, error: "forbidden" };
+      if (flooded(s.code, uid, "caption", 40)) return { ok: false, error: "rate_limited" };
       const text = clean(a.text, 300);
       if (!text) return { ok: false, error: "forbidden" };
       const caption: Caption = {
@@ -449,6 +514,16 @@ export function act(
       // ring buffer, so a client whose SSE stream is swallowed by a proxy
       // still receives everything through the /poll fallback.
       if (!me || !a.to || !s.members.has(a.to)) return { ok: false, error: "forbidden" };
+      if (flooded(s.code, uid, "signal", 150)) return { ok: false, error: "rate_limited" };
+      // SDP answers are a few KB; anything larger is abuse, not WebRTC.
+      let payloadSize = 0;
+      try {
+        payloadSize = JSON.stringify(a.payload ?? null).length;
+      } catch {
+        return { ok: false, error: "bad_payload" };
+      }
+      if (!Number.isFinite(payloadSize) || payloadSize > SIGNAL_MAX_BYTES)
+        return { ok: false, error: "payload_too_large" };
       const key = `${s.code}:${a.to}`;
       let log = hub.signalLogs.get(key);
       if (!log) hub.signalLogs.set(key, (log = { items: [], next: 1 }));
@@ -464,10 +539,19 @@ export function act(
 }
 
 /* ---------- live connections (SSE) ---------- */
-export function addListener(codeRaw: string, uid: string, send: Send): (() => void) | null {
+export function addListener(
+  codeRaw: string,
+  uid: string,
+  send: Send,
+  token?: string,
+): (() => void) | null {
   const code = normalizeCode(codeRaw);
   const s = hub.spaces.get(code);
   if (!s) return null;
+  // A member's live stream (state, signals, captions) is member-only data:
+  // no valid room token, no stream.
+  if ((s.members.has(uid) || s.pending.has(uid)) && !verifyRoomToken(token, s.code, uid))
+    return null;
   let byUid = hub.listeners.get(code);
   if (!byUid) hub.listeners.set(code, (byUid = new Map()));
   let set = byUid.get(uid);
@@ -528,13 +612,22 @@ export interface PollResult {
  * swallow Server-Sent Events (Codespaces port forwarding does exactly that,
  * which killed audio, camera, share, control AND caption updates at once).
  */
-export function pollSpace(codeRaw: string, uid: string, since: number, sig: string): PollResult | null {
+export function pollSpace(
+  codeRaw: string,
+  uid: string,
+  since: number,
+  sig: string,
+  token?: string,
+): PollResult | null {
   const code = normalizeCode(codeRaw);
   const s = hub.spaces.get(code);
   if (!s) return null;
   const me = s.members.get(uid);
   const waiting = s.pending.has(uid);
   if (!me && !waiting) return null; // kicked / closed / never joined
+  // Relayed signals and member views need the room token — a bare uid claim
+  // must not read somebody else's WebRTC negotiation.
+  if (!verifyRoomToken(token, s.code, uid)) return null;
 
   const timerKey = `${code}:${uid}`;
   hub.pollSeen.set(timerKey, Date.now());

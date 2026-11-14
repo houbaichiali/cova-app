@@ -1,4 +1,4 @@
-import { addListener, sessionState } from "@/server/quiz-store";
+import { addListener, isSessionMember, sessionState } from "@/server/quiz-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,6 +11,25 @@ export const runtime = "nodejs";
 export async function GET(req: Request, { params }: { params: Promise<{ pin: string }> }) {
   const { pin } = await params;
   const uid = new URL(req.url).searchParams.get("uid") ?? "";
+  // The quiz state (players, scores, questions) is for participants only:
+  // the SSE stream refuses anyone who is not the host or a joined player.
+  if (!uid || !isSessionMember(pin, uid)) {
+    const enc0 = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc0.encode(`event: closed\ndata: {}\n\n`));
+          c.close();
+        },
+      }),
+      {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      },
+    );
+  }
   const enc = new TextEncoder();
   let cleanup: (() => void) | null = null;
   let ping: ReturnType<typeof setInterval> | undefined;
