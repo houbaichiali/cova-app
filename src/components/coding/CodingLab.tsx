@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { ArrowLeft, Code2, FilePlus2, FolderOpen, Play, RotateCcw, Save, Send, Terminal } from "lucide-react";
+import { ArrowLeft, Code2, FilePlus2, FolderOpen, Medal, Play, RotateCcw, Save, Send, Terminal } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -12,6 +12,14 @@ import { getSupabase } from "@/lib/supabase/client";
 import { JupyterNotebook } from "@/components/coding/JupyterNotebook";
 
 type LanguageId = "python" | "javascript" | "typescript" | "html" | "css" | "c" | "cpp" | "java" | "csharp" | "php" | "go" | "rust" | "sql";
+
+type MasteryRow = {
+  language: string;
+  attempts: number;
+  trophies: number;
+  mastery_rank: number;
+  mastery_label: string;
+};
 type Language = { id: LanguageId; extension: string; files: Record<string, string>; description: string; runtime: "browser" | "external" | "preview" };
 type DirectoryHandleLike = {
   getDirectoryHandle(name: string, options: { create: boolean }): Promise<DirectoryHandleLike>;
@@ -108,6 +116,7 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
   const [standardInput, setStandardInput] = useState("");
   const [projectName, setProjectName] = useState(assignmentTitle ? safeProjectName(assignmentTitle) : "cova-project");
   const [displayName, setDisplayName] = useState("");
+  const [mastery, setMastery] = useState<MasteryRow[] | null>(null);
   const [localDirectory, setLocalDirectory] = useState<DirectoryHandleLike | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [running, setRunning] = useState(false);
@@ -148,6 +157,21 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
   useEffect(() => {
     if (hydrated) localStorage.setItem("cova-coding-projects-v1", JSON.stringify(files));
   }, [files, hydrated]);
+
+  // Coding Mastery (per-language trophies). Quietly unavailable when the
+  // progression migration has not been applied yet.
+  useEffect(() => {
+    let cancelled = false;
+    void getSupabase()
+      .rpc("my_coding_mastery")
+      .then(({ data, error }) => {
+        if (cancelled || error) return;
+        setMastery((data ?? []) as unknown as MasteryRow[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -448,6 +472,14 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
       }).eq("id", submission.id);
       if (error) throw error;
       setSubmission({ ...submission, status: "submitted" });
+      // Record the attempt for the reward engine (trophy + rule XP, once per
+      // assignment). Quietly skipped when the migration is not applied yet.
+      const { error: attemptError } = await supabase.from("coding_attempts").insert({
+        language: languageId,
+        outcome: "success",
+        assignment_id: assignmentId,
+      });
+      if (attemptError) console.warn("coding_attempts not active:", attemptError.message);
       toast.push(t("coding.submitted"));
     } catch (error) {
       console.error("Unable to submit coding project:", error);
@@ -470,6 +502,28 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
           </div>
           {assignmentLoading ? <Badge tone="outline">{t("assignments.loading")}</Badge> : assignmentError ? <p role="alert" className="text-sm text-red-700">{t("coding.assignmentUnavailable")}</p> : submission?.status === "submitted" || submission?.status === "graded" ? <Badge tone="soft">{t("assignments.status.submitted")}</Badge> : submissionWindowOpen ? <Badge tone="outline">{submission?.status === "in_progress" ? t("assignments.status.in-progress") : t("coding.startAssignment")}</Badge> : <Badge tone="outline">{t("assignments.deadlinePassed")}</Badge>}
         </CardBody></Card>
+      )}
+
+      {!language && !jupyterOpen && mastery && mastery.length > 0 && (
+        <Card>
+          <CardBody className="space-y-2">
+            <p className="flex items-center gap-2 font-semibold">
+              <Medal className="h-5 w-5 text-cova-muted" aria-hidden="true" />
+              {t("coding.masteryTitle")}
+            </p>
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {mastery.map((row) => (
+                <li key={row.language} className="rounded-lg bg-cova-pale px-3 py-2 text-sm">
+                  <p className="font-medium">{languageLabel(row.language as LanguageId) || row.language}</p>
+                  <p className="text-xs text-cova-mute">
+                    {t("coding.masteryRank", { rank: row.mastery_label })} ·{" "}
+                    {t("coding.masteryTrophies", { trophies: row.trophies })}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
       )}
 
       {!language && !jupyterOpen && <PageHeader title={t("nav.coding")} description={t("coding.pageDescription")} />}
