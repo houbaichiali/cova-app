@@ -22,11 +22,6 @@ type RealProfile = {
   xp: number | null;
 };
 
-type LeaderboardEntry = {
-  user_code: string | null;
-  rank: number | null;
-};
-
 export function DashboardView() {
   const { t, formatTag } = useI18n();
   const state = useDemoState();
@@ -176,7 +171,7 @@ export function DashboardView() {
 
         const { data: userProfile, error: profileError } = await supabase
           .from("profiles")
-          .select("user_code")
+          .select("user_code, xp")
           .eq("id", authData.user.id)
           .maybeSingle();
 
@@ -190,11 +185,13 @@ export function DashboardView() {
 
         if (!userProfile?.user_code) return;
 
-        const { data, error } = await supabase
-          .from("leaderboard")
-          .select("user_code, rank")
-          .eq("user_code", userProfile.user_code)
-          .maybeSingle();
+        // Rang global réel : 1 + nombre de vrais membres devant en XP totale.
+        // (L'ancien code interrogeait la vue `leaderboard`, inexistante en base.)
+        const { count, error } = await supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .gt("xp", userProfile.xp ?? 0)
+          .eq("is_sample", false);
 
         if (error) {
           console.error(
@@ -204,10 +201,8 @@ export function DashboardView() {
           return;
         }
 
-        const entry = data as LeaderboardEntry | null;
-
-        if (active && entry?.rank != null) {
-          setLeaderboardRank(Number(entry.rank));
+        if (active && count != null) {
+          setLeaderboardRank(count + 1);
         }
       } catch (error) {
         console.error("Impossible de charger le classement :", error);

@@ -171,10 +171,15 @@ export function useSpace(code: string, uid: string) {
     setView(null);
     setNotFound(false);
     setEnded(null);
+  }
+  // Refs must not be written during render; reset them on commit instead.
+  // This effect is declared before the effects below, so on a code change it
+  // runs first and the fresh room still starts with empty signal bookkeeping.
+  useEffect(() => {
     seenSignals.current = new Set();
     sinceRef.current = 0;
     sigRef.current = "";
-  }
+  }, [code]);
 
   // First load (works for people who are not in the space yet). A member
   // without their token only ever sees the public summary — which then makes

@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Globe, Lock, SearchX, Trash2, UserPlus, Users } from "lucide-react";
 import { MediaComposer } from "@/components/common/MediaComposer";
 import { PostAttachments } from "@/components/common/PostAttachments";
+import { PostInteractions } from "@/components/common/PostInteractions";
+import { ReportButton } from "@/components/common/ReportButton";
 import { SharePanel } from "@/components/common/SharePanel";
 import {
   MembersTab,
@@ -24,7 +26,6 @@ import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
-import { getStudent } from "@/data/students";
 import { useT } from "@/i18n/client";
 import type { TFunction } from "@/i18n/translate";
 import { useHydrated } from "@/lib/use-hydrated";
@@ -400,16 +401,17 @@ export function CommunityDetail({
                   p.authorId === meId ||
                   role === "owner" ||
                   (role === "admin" && authorRole !== "owner" && authorRole !== "admin");
-                const profile = author && getStudent(author.id);
                 return (
                   <Card key={p.id}>
                     <CardBody className="flex gap-3">
                       <Avatar name={authorLabel(author)} tone={author?.tone} size="sm" />
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-2 text-sm">
-                          {profile ? (
+                          {author ? (
+                            // SocialUser.id is the public COVA code — link the
+                            // real public profile, not the legacy demo page.
                             <Link
-                              href={`/community/${profile.id}`}
+                              href={`/u/${author.id}`}
                               className="font-semibold hover:underline"
                             >
                               {authorLabel(author)}
@@ -424,7 +426,14 @@ export function CommunityDetail({
                           <p className="mt-1 whitespace-pre-line break-words text-sm">{p.text}</p>
                         )}
                         <PostAttachments attachments={p.attachments} />
+                        <PostInteractions postId={p.id} users={social.users} meId={meId} />
                       </div>
+                      {p.authorId !== meId && (
+                        <ReportButton
+                          contentRef={`space_post:${p.id}`}
+                          reportedUser={p.authorId}
+                        />
+                      )}
                       {canDelete && (
                         <button
                           type="button"

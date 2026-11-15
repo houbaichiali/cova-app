@@ -1,17 +1,36 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useS } from "@/i18n/spaces";
+import { getSupabase } from "@/lib/supabase/client";
 import { levelForXp, useGamification } from "@/lib/gamification";
 
-/** Achievements summary on the profile page: badges, XP, level, recent wins. */
+type RankRow = { badge_key: string; rank: number; label: string; awarded_at: string };
+
+/** Achievements summary on the profile page: badges, XP, level, ranks, recent wins. */
 export function AchievementsCard() {
   const t = useS();
   const { definitions, myBadges, xp } = useGamification();
+  const [ranks, setRanks] = useState<RankRow[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getSupabase()
+      .rpc("my_badge_ranks")
+      .then(({ data, error }) => {
+        if (cancelled || error) return;
+        setRanks((data ?? []) as unknown as RankRow[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (!myBadges || !definitions) return null;
 
   const level = levelForXp(xp ?? 0);
@@ -51,6 +70,21 @@ export function AchievementsCard() {
             )}
           </div>
         </div>
+        {ranks && ranks.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-sm font-semibold">{t("gm.profile.ranks")}</p>
+            <ul className="flex flex-wrap gap-2 text-xs">
+              {ranks.slice(0, 6).map((row) => (
+                <li
+                  key={`${row.badge_key}-${row.rank}`}
+                  className="rounded-full bg-cova-pale px-3 py-1 font-medium"
+                >
+                  {row.badge_key} · {row.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {recent.length > 0 && (
           <div>
             <p className="mb-1.5 text-sm font-semibold">{t("gm.profile.recent")}</p>

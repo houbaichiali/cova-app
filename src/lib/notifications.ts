@@ -19,6 +19,17 @@ const KIND_KEYS: Record<string, MessageKey> = {
   assignment_graded: "notif.assignment_graded",
   xp_earned: "notif.xp_earned",
   resource_added: "notif.resource_added",
+  new_message: "notif.new_message",
+  deadline_reminder: "notif.deadline_reminder",
+  badge_unlocked: "notif.badge_unlocked",
+  level_up: "notif.level_up",
+  sanction: "notif.sanction",
+  sanction_lifted: "notif.sanction_lifted",
+  appeal_decision: "notif.appeal_decision",
+  new_follower: "notif.new_follower",
+  qa_answer: "notif.qa_answer",
+  collab_accepted: "notif.collab_accepted",
+  badge_rank: "notif.badge_rank",
 };
 
 /** Kinds whose `detail` (course name) may be empty and then read better without it. */

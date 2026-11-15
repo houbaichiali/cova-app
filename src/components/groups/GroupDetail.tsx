@@ -9,6 +9,7 @@ import { SharePanel } from "@/components/common/SharePanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,12 @@ type GroupMessage = {
 
 type MemberRole = "owner" | "admin" | "member";
 
+type GroupMember = {
+  user_id: string;
+  role: string;
+  display_name: string | null;
+};
+
 /** Supabase errors lose their message when thrown around — always surface a real text. */
 const errText = (err: unknown, fallback: string): string =>
   err instanceof Error && err.message ? err.message : fallback;
@@ -54,6 +61,8 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Charger les publications depuis space_posts
   const loadMessages = useCallback(async (spaceId: string) => {
@@ -78,6 +87,32 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
     }
 
     setMessages((data ?? []) as GroupMessage[]);
+  }, []);
+
+  // Liste des membres telle que la RLS permet de la voir (tous les membres
+  // d'un groupe public ; le propriétaire partout ; ses propres lignes sinon).
+  const loadMembers = useCallback(async (spaceId: string) => {
+    const supabase = getSupabase();
+
+    const { data, error: membersError } = await supabase
+      .from("space_members")
+      .select("user_id,role")
+      .eq("space_id", spaceId)
+      .order("joined_at", { ascending: true });
+
+    if (membersError) throw membersError;
+
+    const rows = (data ?? []) as { user_id: string; role: string }[];
+    const ids = rows.map((row) => row.user_id);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id,display_name")
+      .in("id", ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"]);
+
+    const names = new Map(
+      (profiles ?? []).map((p) => [p.id, (p.display_name as string | null) ?? null]),
+    );
+    setMembers(rows.map((row) => ({ ...row, display_name: names.get(row.user_id) ?? null })));
   }, []);
 
   // Charger le groupe et le rôle de l'utilisateur
@@ -159,10 +194,12 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
 
       if (!memberRole) {
         setMessages([]);
+        setMembers([]);
         return;
       }
 
       await loadMessages(currentGroup.id);
+      await loadMembers(currentGroup.id);
     } catch (err) {
       console.error("Error loading group:", err);
       setError(errText(err, t("groupDetail.notFoundDesc")));
@@ -249,6 +286,64 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
   }, [group, role, loadMessages, t]);
 
   const isStaff = role === "owner" || role === "admin";
+
+  // Quitter le groupe : la RLS space_members_delete_v3 autorise chacun à
+  // supprimer sa propre ligne. Le propriétaire doit supprimer le groupe.
+  async function leaveGroup() {
+    if (!group || !userId) return;
+    setBusy(true);
+    try {
+      const supabase = getSupabase();
+      const { error: delError } = await supabase
+        .from("space_members")
+        .delete()
+        .eq("space_id", group.id)
+        .eq("user_id", userId);
+      if (delError) throw delError;
+      setNotice(t("group.left"));
+      setRole(null);
+      setMessages([]);
+      setMembers([]);
+      await loadGroup();
+    } catch (err) {
+      setError(errText(err, t("groupDetail.postError")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Suppression réservée au propriétaire (policy spaces_delete_v3).
+  async function deleteGroup() {
+    if (!group) return;
+    setBusy(true);
+    try {
+      const supabase = getSupabase();
+      const { error: delError } = await supabase.from("spaces").delete().eq("id", group.id);
+      if (delError) throw delError;
+      router.push("/groups");
+    } catch (err) {
+      setError(errText(err, t("groupDetail.postError")));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Le propriétaire peut promouvoir ou rétrograder un membre (RLS update).
+  async function setMemberRole(memberUserId: string, nextRole: "admin" | "member") {
+    if (!group) return;
+    try {
+      const supabase = getSupabase();
+      const { error: upError } = await supabase
+        .from("space_members")
+        .update({ role: nextRole })
+        .eq("space_id", group.id)
+        .eq("user_id", memberUserId);
+      if (upError) throw upError;
+      await loadMembers(group.id);
+    } catch (err) {
+      setError(errText(err, t("groupDetail.postError")));
+    }
+  }
 
   // "members" (legacy) and "everyone" both mean every member can post.
   const canPost =
@@ -531,11 +626,94 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
             {t("groupDetail.yourRole")}: {roleLabel}
           </p>
 
+          {role && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">{t("group.members")}</h3>
+              {members.length === 0 ? (
+                <p className="text-sm text-cova-mute">{t("group.membersHidden")}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {members.map((member) => (
+                    <li
+                      key={member.user_id}
+                      className="flex items-center justify-between gap-2 text-sm"
+                    >
+                      <span className="min-w-0 truncate">
+                        {member.user_id === userId
+                          ? t("group.memberYou")
+                          : member.display_name || member.user_id.slice(0, 8)}
+                        {member.role === "owner" ? ` · ${t("community.roleOwner")}` : ""}
+                      </span>
+                      {role === "owner" && member.role !== "owner" && (
+                        <select
+                          aria-label={t("group.setRole")}
+                          value={member.role === "admin" ? "admin" : "member"}
+                          onChange={(event) =>
+                            void setMemberRole(
+                              member.user_id,
+                              event.target.value as "admin" | "member",
+                            )
+                          }
+                          className="rounded-lg border border-cova-line bg-white px-2 py-1 text-xs dark:bg-cova-ink"
+                        >
+                          <option value="member">{t("community.roleMember")}</option>
+                          <option value="admin">{t("community.roleAdmin")}</option>
+                        </select>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <Button variant="secondary" className="w-full" onClick={() => router.push("/groups")}>
             {t("groupDetail.back")}
           </Button>
+
+          {role && role !== "owner" && (
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => void leaveGroup()}
+              disabled={busy}
+            >
+              {t("group.leave")}
+            </Button>
+          )}
+
+          {role === "owner" && (
+            <Button
+              variant="ghost"
+              className="w-full text-red-600"
+              onClick={() => setConfirmDelete(true)}
+              disabled={busy}
+            >
+              {t("group.deleteGroup")}
+            </Button>
+          )}
         </Card>
       </div>
+
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={t("group.deleteGroup")}
+        description={t("group.deleteConfirm")}
+      >
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+            {t("dm.cancel")}
+          </Button>
+          <Button
+            onClick={() => void deleteGroup()}
+            disabled={busy}
+            className="text-red-600"
+          >
+            {t("group.deleteGroup")}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

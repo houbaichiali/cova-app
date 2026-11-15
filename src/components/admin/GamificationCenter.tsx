@@ -33,6 +33,8 @@ interface BadgeRow {
   sort_order: number;
   image_url: string | null;
   unlocked_count: number;
+  visibility_mode: string;
+  ranks: { rank: number; threshold: number }[];
 }
 
 interface RecipientRow {
@@ -91,6 +93,8 @@ interface BadgeEditor {
   enabled: boolean;
   sort_order: string;
   image_url: string | null;
+  visibility_mode: string;
+  ranks: string;
 }
 
 /** Badge + XP management. All writes go through the audited gamification
@@ -171,6 +175,7 @@ export function GamificationCenter() {
       key: "", isNew: true, name: "", description: "", category: "learning",
       metric: "registered", threshold: "1", rarity: "common", xp_reward: "20",
       secret: false, limited: false, enabled: true, sort_order: "0", image_url: null,
+      visibility_mode: "public", ranks: "[]",
     });
   }
 
@@ -181,11 +186,21 @@ export function GamificationCenter() {
       rarity: b.rarity, xp_reward: String(b.xp_reward), secret: b.secret,
       limited: b.limited, enabled: b.enabled, sort_order: String(b.sort_order),
       image_url: b.image_url,
+      visibility_mode: b.visibility_mode ?? "public",
+      ranks: JSON.stringify(b.ranks ?? []),
     });
   }
 
   async function saveBadge() {
     if (!editor) return;
+    let parsedRanks: { rank: number; threshold: number }[] = [];
+    try {
+      parsedRanks = editor.ranks.trim().length === 0 ? [] : JSON.parse(editor.ranks);
+      if (!Array.isArray(parsedRanks)) throw new Error("not an array");
+    } catch {
+      toast.push(t("admin.gamif.ranksInvalid"));
+      return;
+    }
     setEditorBusy(true);
     const { error: rpcError } = await getSupabase().rpc("admin_badge_save", {
       p_key: editor.key.trim().toLowerCase(),
@@ -201,6 +216,8 @@ export function GamificationCenter() {
       p_enabled: editor.enabled,
       p_sort_order: parseInt(editor.sort_order, 10) || 0,
       p_image_url: editor.image_url,
+      p_visibility_mode: editor.visibility_mode,
+      p_ranks: parsedRanks,
     });
     setEditorBusy(false);
     if (rpcError) {
@@ -648,6 +665,27 @@ export function GamificationCenter() {
               <Switch checked={editor.limited} onChange={(v) => setEditor({ ...editor, limited: v })} label={t("admin.gamif.limited")} />
               <Switch checked={editor.enabled} onChange={(v) => setEditor({ ...editor, enabled: v })} label={t("admin.gamif.enabled")} />
             </div>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">{t("admin.gamif.visibility")}</span>
+              <select
+                value={editor.visibility_mode}
+                onChange={(e) => setEditor({ ...editor, visibility_mode: e.target.value })}
+                className="h-10 w-full rounded-lg border border-cova-line bg-white px-3 text-sm dark:bg-cova-ink"
+              >
+                <option value="public">{t("admin.gamif.visPublic")}</option>
+                <option value="private">{t("admin.gamif.visPrivate")}</option>
+                <option value="hidden">{t("admin.gamif.visHidden")}</option>
+              </select>
+            </label>
+
+            <TextAreaField
+              id="badge-ranks"
+              label={t("admin.gamif.ranksLabel")}
+              hint={t("admin.gamif.ranksHint")}
+              value={editor.ranks}
+              onChange={(e) => setEditor({ ...editor, ranks: e.target.value })}
+            />
 
             <p className="rounded-lg bg-cova-bg px-3 py-2 text-xs text-cova-mute">{t("admin.gamif.noDeleteNote")}</p>
             <div className="flex justify-end gap-2">

@@ -2,8 +2,9 @@ import type { Locale } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/translate";
 import {
   Award,
-  BookOpen,
   Bell,
+  Bookmark,
+  BookOpen,
   CircleUserRound,
   ClipboardList,
   Code2,
@@ -12,6 +13,7 @@ import {
   Heart,
   LayoutDashboard,
   MessageSquare,
+  MessagesSquare,
   Mic,
   Settings,
   ShieldCheck,
@@ -54,6 +56,7 @@ export const navSections: NavSection[] = [
       { href: "/messages", labelKey: "nav.messages", icon: MessageSquare },
       { href: "/voicing", label: { en: "Voicing", fr: "Voicing", ar: "Voicing" }, icon: Mic },
       { href: "/groups", labelKey: "nav.groups", icon: UsersRound },
+      { href: "/qa", labelKey: "nav.qa", icon: MessagesSquare },
       { href: "/friends", labelKey: "nav.friends", icon: Heart },
     ],
   },
@@ -62,6 +65,7 @@ export const navSections: NavSection[] = [
     items: [
       { href: "/profile", labelKey: "nav.profile", icon: CircleUserRound },
       { href: "/notifications", labelKey: "nav.notifications", icon: Bell },
+      { href: "/saved", labelKey: "nav.saved", icon: Bookmark },
       { href: "/leaderboard", labelKey: "nav.leaderboard", icon: Trophy },
       { href: "/settings", labelKey: "nav.settings", icon: Settings },
       { href: "/admin", labelKey: "nav.admin", icon: ShieldCheck },
