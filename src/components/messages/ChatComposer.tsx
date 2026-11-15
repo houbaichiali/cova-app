@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
 import { MAX_MEDIA_BYTES, uploadMedia } from "@/lib/media-upload";
+import { getSupabase } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { PostAttachment } from "@/types/social";
 
@@ -84,7 +85,9 @@ export function ChatComposer({
       }
       setUploading(true);
       try {
-        const result = await uploadMedia("dm", file, "dm-media");
+        // dm-media policy requires uploads to live in the sender's own folder.
+        const senderId = (await getSupabase().auth.getUser()).data.user?.id ?? "dm";
+        const result = await uploadMedia(senderId, file, "dm-media");
         if (result.ok) {
           setQueue((q) => [...q, result.value]);
         } else {

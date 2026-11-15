@@ -206,7 +206,9 @@ export function useVoiceMesh({ enabled, meUid, peerUids, sendSignal, onSignal }:
     userVolumes.current = saved;
     const obj: Record<string, number> = {};
     saved.forEach((v, k) => (obj[k] = v));
-    setVolumes(obj);
+    // Deferred one microtask: a synchronous setState on mount cascades an
+    // extra render pass (react-hooks set-state-in-effect rule).
+    queueMicrotask(() => setVolumes(obj));
     fetch("/api/ice")
       .then((r) => r.json())
       .then((d: { iceServers?: RTCIceServer[] }) => {
