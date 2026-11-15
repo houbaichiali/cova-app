@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  AlarmClock,
   Award,
   Bell,
   BellOff,
@@ -10,7 +11,13 @@ import {
   Check,
   ClipboardCheck,
   ClipboardList,
+  Medal,
+  MessageSquare,
+  Scale,
   Shield,
+  ShieldAlert,
+  ShieldCheck,
+  TrendingUp,
   UserCheck,
   UserPlus,
   Users,
@@ -38,6 +45,13 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   role_changed: Shield,
   assignment_created: ClipboardList,
   assignment_graded: ClipboardCheck,
+  new_message: MessageSquare,
+  deadline_reminder: AlarmClock,
+  badge_unlocked: Medal,
+  level_up: TrendingUp,
+  sanction: ShieldAlert,
+  sanction_lifted: ShieldCheck,
+  appeal_decision: Scale,
   xp_earned: Award,
   resource_added: BookOpen,
 };

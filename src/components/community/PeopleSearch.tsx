@@ -20,7 +20,6 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
-import { getStudent } from "@/data/students";
 import { copyText } from "@/lib/clipboard";
 import {
   friendsOf,
@@ -35,19 +34,15 @@ import type { SocialUser } from "@/types/social";
 
 function PersonName({ user }: { user: SocialUser }) {
   const t = useT();
-  const hasProfile = !!getStudent(user.id);
   return (
     <div className="min-w-0">
-      {hasProfile ? (
-        <Link
-          href={`/community/${user.id}`}
-          className="block truncate text-sm font-semibold hover:underline"
-        >
-          {user.displayName}
-        </Link>
-      ) : (
-        <p className="truncate text-sm font-semibold">{user.displayName}</p>
-      )}
+      {/* user.id is the public COVA code (social-store maps profiles.user_code). */}
+      <Link
+        href={`/u/${user.id}`}
+        className="block truncate text-sm font-semibold hover:underline"
+      >
+        {user.displayName}
+      </Link>
       <p className="flex flex-wrap items-center gap-x-2 text-xs text-cova-mute">
         <span className="font-mono">{user.id}</span>
         {user.sample && <Badge tone="outline">{t("people.sample")}</Badge>}

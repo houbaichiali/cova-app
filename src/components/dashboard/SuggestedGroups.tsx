@@ -43,6 +43,7 @@ export function SuggestedGroups() {
           .from("spaces")
           .select("id, name, description, category")
           .eq("visibility", "public")
+          .eq("kind", "group")
           .order("created_at", { ascending: false })
           .limit(20);
 
