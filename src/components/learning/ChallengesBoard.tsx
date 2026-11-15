@@ -42,7 +42,8 @@ export function ChallengesBoard() {
   const [category, setCategory] = useState<ChallengeKind>("Coding");
   const [level, setLevel] = useState<Difficulty>("Easy");
   const [exerciseType, setExerciseType] = useState<ChallengeType>("quiz");
-  const [points, setPoints] = useState(20);
+  // Points are no longer typed by the author: the server derives the display
+  // ceiling from the difficulty and XP comes from the reward rules (Phase 6).
   const [minutes, setMinutes] = useState(15);
   const [prompt, setPrompt] = useState("");
   const [optionsText, setOptionsText] = useState("");
@@ -84,7 +85,7 @@ export function ChallengesBoard() {
   const options = optionsText.split("\n").map((option) => option.trim()).filter(Boolean);
 
   function resetForm() {
-    setTitle(""); setDescription(""); setCategory("Coding"); setLevel("Easy"); setExerciseType("quiz"); setPoints(20); setMinutes(15); setPrompt(""); setOptionsText(""); setCorrectIndex(0); setPairsText(""); setChallengeFile(null);
+    setTitle(""); setDescription(""); setCategory("Coding"); setLevel("Easy"); setExerciseType("quiz"); setMinutes(15); setPrompt(""); setOptionsText(""); setCorrectIndex(0); setPairsText(""); setChallengeFile(null);
   }
 
   async function createChallenge(event: FormEvent<HTMLFormElement>) {
@@ -123,7 +124,7 @@ export function ChallengesBoard() {
       const supabase = getSupabase();
       const { error } = await supabase.from("challenges").insert({
         id: challengeId, created_by: userId, title: title.trim(), description: description.trim(), category, difficulty: level,
-        points, minutes, exercise_type: exerciseType, questions,
+        minutes, exercise_type: exerciseType, questions,
       });
       if (error) throw error;
       if (answerKey.length) {
@@ -181,7 +182,6 @@ export function ChallengesBoard() {
             <label className="text-sm font-medium">{t("challenges.category")}<select value={category} onChange={(event) => setCategory(event.target.value as ChallengeKind)} className="mt-1.5 h-10 w-full rounded-lg border border-cova-line bg-white px-3 text-sm">{TABS.slice(1).map((item) => <option key={item} value={item}>{t(`challenges.kind.${item.toLowerCase()}` as never)}</option>)}</select></label>
             <label className="text-sm font-medium">{t("challenges.difficulty")}<select value={level} onChange={(event) => setLevel(event.target.value as Difficulty)} className="mt-1.5 h-10 w-full rounded-lg border border-cova-line bg-white px-3 text-sm">{["Easy","Medium","Hard"].map((item) => <option key={item} value={item}>{t(`challenges.difficulty.${item.toLowerCase()}` as never)}</option>)}</select></label>
             <label className="text-sm font-medium">{t("challenges.exerciseType")}<select value={exerciseType} onChange={(event) => setExerciseType(event.target.value as ChallengeType)} className="mt-1.5 h-10 w-full rounded-lg border border-cova-line bg-white px-3 text-sm">{(["quiz","matching","intruder","ordering","written","coding","file"] as const).map((item) => <option key={item} value={item}>{t(`challenges.type.${item}` as never)}</option>)}</select></label>
-            <TextField id="challenge-points" label={t("challenges.pointsLabel")} type="number" min={1} max={1000} value={points} onChange={(event) => setPoints(Number(event.target.value))} required />
             <TextField id="challenge-minutes" label={t("challenges.durationLabel")} type="number" min={1} max={1440} value={minutes} onChange={(event) => setMinutes(Number(event.target.value))} required />
           </div>
           {exerciseType === "matching" ? <TextAreaField id="challenge-pairs" label={t("challenges.matchingPairs")} hint={t("challenges.matchingHint")} placeholder={t("challenges.matchingPlaceholder")} value={pairsText} onChange={(event) => setPairsText(event.target.value)} required /> : ["quiz","intruder","ordering"].includes(exerciseType) ? <>

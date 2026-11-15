@@ -93,7 +93,9 @@ export function AssignmentCreate({
   const [estimatedMinutes, setEstimatedMinutes] = useState("");
   const [availableFrom, setAvailableFrom] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [points, setPoints] = useState(100);
+  // External assignments are graded out of a fixed 100; XP for submitting
+  // comes from the reward rules, never from a manually typed amount (Phase 6).
+  const EXTERNAL_TOTAL_POINTS = 100;
 
   const [formats, setFormats] = useState<string[]>(["PDF"]);
   const [maxFileMb, setMaxFileMb] = useState(20);
@@ -108,8 +110,8 @@ export function AssignmentCreate({
   const [allowReview, setAllowReview] = useState(true);
 
   const totalPoints = useMemo(
-    () => (mode === "interactive" ? exercises.reduce((sum, e) => sum + exercisePoints(e), 0) : points),
-    [mode, exercises, points],
+    () => (mode === "interactive" ? exercises.reduce((sum, e) => sum + exercisePoints(e), 0) : EXTERNAL_TOTAL_POINTS),
+    [mode, exercises],
   );
   const questionCount = useMemo(
     () => (mode === "interactive" ? exercises.reduce((sum, e) => sum + exerciseQuestionCount(e), 0) : 0),
@@ -131,7 +133,6 @@ export function AssignmentCreate({
     setEstimatedMinutes("");
     setAvailableFrom("");
     setDueAt("");
-    setPoints(100);
     setFormats(["PDF"]);
     setMaxFileMb(20);
     setSubmissionInstructions("");
@@ -342,7 +343,7 @@ export function AssignmentCreate({
               <h3 className="text-sm font-semibold">{t("assignments.create.sectionParams")}</h3>
               <div className="grid gap-4 sm:grid-cols-3">
                 {mode === "external" && (
-                  <TextField id="create-points" type="number" label={t("assignments.pointsLabel")} value={points} onChange={(event) => setPoints(Number(event.target.value))} min={1} max={10000} required />
+                  <TextField id="create-total" type="number" label={t("assignments.create.totalPoints")} value={EXTERNAL_TOTAL_POINTS} readOnly />
                 )}
                 {mode === "interactive" && (
                   <TextField id="create-total" type="number" label={t("assignments.create.totalPoints")} value={totalPoints} readOnly />
