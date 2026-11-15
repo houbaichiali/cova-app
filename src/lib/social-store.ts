@@ -2416,4 +2416,194 @@ export const socialActions = {
     await refresh("notifications");
     return ok(undefined);
   },
+
+  /* ---- post interactions (likes, bookmarks, comments) ---- */
+
+  /**
+   * What one post looks like to the caller: like count, own like, own
+   * bookmark and the comment thread. Comment author ids come back as public
+   * COVA codes so the shared users cache can resolve names.
+   */
+  async loadPostInteractions(
+    postId: string,
+  ): Promise<
+    ActionResult<{
+      likeCount: number;
+      likedByMe: boolean;
+      bookmarked: boolean;
+      comments: {
+        id: string;
+        authorId: string;
+        parentId: string | null;
+        body: string;
+        createdAt: string;
+      }[];
+    }>
+  > {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const sb = s.value.sb;
+    const meUuid = s.value.me;
+
+    const [reactionsQ, bookmarkQ, commentsQ] = await Promise.all([
+      sb.from("post_reactions").select("kind,user_id").eq("post_id", postId),
+      sb
+        .from("post_bookmarks")
+        .select("post_id")
+        .eq("post_id", postId)
+        .eq("user_id", meUuid)
+        .maybeSingle(),
+      sb
+        .from("post_comments")
+        .select("id,author_id,parent_id,body,created_at")
+        .eq("post_id", postId)
+        .order("created_at", { ascending: true })
+        .limit(100),
+    ]);
+    if (reactionsQ.error || bookmarkQ.error || commentsQ.error)
+      return fail("Interactions are not active yet. Ask the project owner to run the SQL setup.");
+
+    const reactionRows = (reactionsQ.data ?? []) as { kind: string; user_id: string }[];
+    const commentRows = (commentsQ.data ?? []) as {
+      id: string;
+      author_id: string;
+      parent_id: string | null;
+      body: string;
+      created_at: string;
+    }[];
+    await ensureProfiles(
+      sb,
+      commentRows.map((c) => c.author_id),
+    );
+    commit({ users: usersSnapshot() });
+
+    return ok({
+      likeCount: reactionRows.filter((r) => r.kind === "like").length,
+      likedByMe: reactionRows.some((r) => r.kind === "like" && r.user_id === meUuid),
+      bookmarked: bookmarkQ.data != null,
+      comments: commentRows.map((c) => ({
+        id: c.id,
+        authorId: pub(c.author_id) || c.author_id.slice(0, 8),
+        parentId: c.parent_id,
+        body: c.body,
+        createdAt: c.created_at,
+      })),
+    });
+  },
+
+  /** Adds or removes the caller's "like" on a post (one per user). */
+  async togglePostLike(postId: string): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const mine = await s.value.sb
+      .from("post_reactions")
+      .select("id")
+      .eq("post_id", postId)
+      .eq("user_id", s.value.me)
+      .eq("kind", "like")
+      .maybeSingle();
+    if (mine.error) return fail(describe(mine.error));
+    if (mine.data) {
+      const { error } = await s.value.sb
+        .from("post_reactions")
+        .delete()
+        .eq("id", (mine.data as { id: string }).id);
+      return error ? fail(describe(error)) : ok(undefined);
+    }
+    const { error } = await s.value.sb
+      .from("post_reactions")
+      .insert({ post_id: postId, kind: "like" });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  /** Saves or unsaves a post in the caller's private bookmarks. */
+  async togglePostBookmark(postId: string, saved: boolean): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    if (!saved) {
+      const { error } = await s.value.sb
+        .from("post_bookmarks")
+        .delete()
+        .eq("post_id", postId)
+        .eq("user_id", s.value.me);
+      return error ? fail(describe(error)) : ok(undefined);
+    }
+    const { error } = await s.value.sb.from("post_bookmarks").insert({ post_id: postId });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  async addPostComment(postId: string, body: string, parentId: string | null): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { error } = await s.value.sb
+      .from("post_comments")
+      .insert({ post_id: postId, body, parent_id: parentId });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  async deletePostComment(id: string): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const { error } = await s.value.sb.from("post_comments").delete().eq("id", id);
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  /* ---- follows and blocks ---- */
+
+  /** The caller's follow list and block list, as public COVA codes. */
+  async loadMySocialGraph(): Promise<ActionResult<{ following: string[]; blocked: string[] }>> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const [followQ, blockQ] = await Promise.all([
+      s.value.sb.from("follows").select("followed_id").eq("follower_id", s.value.me),
+      s.value.sb.from("user_blocks").select("blocked_id").eq("blocker_id", s.value.me),
+    ]);
+    if (followQ.error || blockQ.error)
+      return fail("Relationships are not active yet. Ask the project owner to run the SQL setup.");
+    const followedUuids = (followQ.data ?? []).map((r) => (r as { followed_id: string }).followed_id);
+    const blockedUuids = (blockQ.data ?? []).map((r) => (r as { blocked_id: string }).blocked_id);
+    await ensureProfiles(s.value.sb, [...followedUuids, ...blockedUuids]);
+    commit({ users: usersSnapshot() });
+    return ok({
+      following: followedUuids.map((id) => pub(id)).filter(Boolean),
+      blocked: blockedUuids.map((id) => pub(id)).filter(Boolean),
+    });
+  },
+
+  async toggleFollow(otherPublicId: string, follow: boolean): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherPublicId);
+    if (!other) return fail("Profile not found.");
+    if (other === s.value.me) return fail("You cannot follow yourself.");
+    if (!follow) {
+      const { error } = await s.value.sb
+        .from("follows")
+        .delete()
+        .eq("follower_id", s.value.me)
+        .eq("followed_id", other);
+      return error ? fail(describe(error)) : ok(undefined);
+    }
+    const { error } = await s.value.sb.from("follows").insert({ followed_id: other });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  /** Blocking is bidirectional at RLS level: a blocked pair cannot DM or friend-request either way. */
+  async toggleBlock(otherPublicId: string, block: boolean): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherPublicId);
+    if (!other) return fail("Profile not found.");
+    if (other === s.value.me) return fail("You cannot block yourself.");
+    if (!block) {
+      const { error } = await s.value.sb
+        .from("user_blocks")
+        .delete()
+        .eq("blocker_id", s.value.me)
+        .eq("blocked_id", other);
+      return error ? fail(describe(error)) : ok(undefined);
+    }
+    const { error } = await s.value.sb.from("user_blocks").insert({ blocked_id: other });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
 };

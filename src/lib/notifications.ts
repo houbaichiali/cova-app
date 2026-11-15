@@ -26,6 +26,7 @@ const KIND_KEYS: Record<string, MessageKey> = {
   sanction: "notif.sanction",
   sanction_lifted: "notif.sanction_lifted",
   appeal_decision: "notif.appeal_decision",
+  new_follower: "notif.new_follower",
 };
 
 /** Kinds whose `detail` (course name) may be empty and then read better without it. */

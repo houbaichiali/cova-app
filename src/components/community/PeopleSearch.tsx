@@ -52,7 +52,21 @@ function PersonName({ user }: { user: SocialUser }) {
   );
 }
 
-function PersonRow({ user, meId }: { user: SocialUser; meId: string }) {
+function PersonRow({
+  user,
+  meId,
+  following,
+  blockedByMe,
+  onToggleFollow,
+  onToggleBlock,
+}: {
+  user: SocialUser;
+  meId: string;
+  following: boolean;
+  blockedByMe: boolean;
+  onToggleFollow: (publicId: string, follow: boolean) => void;
+  onToggleBlock: (publicId: string, block: boolean) => void;
+}) {
   const toast = useToast();
   const social = useSocial();
   const status = relationStatus(social, meId, user.id);
@@ -134,19 +148,70 @@ function PersonRow({ user, meId }: { user: SocialUser; meId: string }) {
         >
           <MessageSquare className="h-4 w-4" aria-hidden="true" /> Message
         </Link>
+        {user.id !== meId && (
+          <Button
+            size="sm"
+            variant={following ? "secondary" : "ghost"}
+            onClick={() => onToggleFollow(user.id, !following)}
+          >
+            <UserCheck className="h-4 w-4" aria-hidden="true" />
+            {following ? "Following" : "Follow"}
+          </Button>
+        )}
+        {user.id !== meId && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={blockedByMe ? "text-red-600" : undefined}
+            onClick={() => {
+              if (blockedByMe) {
+                onToggleBlock(user.id, false);
+                return;
+              }
+              if (window.confirm(`Block ${user.displayName}? Neither of you will be able to message or friend-request the other.`))
+                onToggleBlock(user.id, true);
+            }}
+          >
+            {blockedByMe ? "Unblock" : "Block"}
+          </Button>
+        )}
       </div>
     </li>
   );
 }
 
-function PeopleList({ title, users, meId }: { title: string; users: SocialUser[]; meId: string }) {
+function PeopleList({
+  title,
+  users,
+  meId,
+  followingIds,
+  blockedIds,
+  onToggleFollow,
+  onToggleBlock,
+}: {
+  title: string;
+  users: SocialUser[];
+  meId: string;
+  followingIds: Set<string>;
+  blockedIds: Set<string>;
+  onToggleFollow: (publicId: string, follow: boolean) => void;
+  onToggleBlock: (publicId: string, block: boolean) => void;
+}) {
   if (users.length === 0) return null;
   return (
     <Card>
       <CardHeader title={title} />
       <ul className="mt-2 divide-y divide-cova-line">
         {users.map((u) => (
-          <PersonRow key={u.id} user={u} meId={meId} />
+          <PersonRow
+            key={u.id}
+            user={u}
+            meId={meId}
+            following={followingIds.has(u.id)}
+            blockedByMe={blockedIds.has(u.id)}
+            onToggleFollow={onToggleFollow}
+            onToggleBlock={onToggleBlock}
+          />
         ))}
       </ul>
     </Card>
@@ -158,12 +223,53 @@ export function PeopleHub({ me }: { me: SocialUser }) {
   const t = useT();
   const social = useSocial();
   const [query, setQuery] = useState("");
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
 
   const results = useMemo(() => searchUsers(social, me.id, query), [social, me.id, query]);
   const friends = useMemo(() => friendsOf(social, me.id), [social, me.id]);
   const incoming = useMemo(() => incomingRequests(social, me.id), [social, me.id]);
   const outgoing = useMemo(() => outgoingRequests(social, me.id), [social, me.id]);
   const searching = query.trim().length > 0;
+
+  // Follows and blocks live outside the social cache; load them once per mount.
+  useEffect(() => {
+    let cancelled = false;
+    void socialActions.loadMySocialGraph().then((graph) => {
+      if (cancelled || !graph.ok) return;
+      setFollowingIds(new Set(graph.value.following));
+      setBlockedIds(new Set(graph.value.blocked));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function onToggleFollow(publicId: string, follow: boolean) {
+    void socialActions.toggleFollow(publicId, follow).then((result) => {
+      if (result.ok) {
+        setFollowingIds((current) => {
+          const next = new Set(current);
+          if (follow) next.add(publicId);
+          else next.delete(publicId);
+          return next;
+        });
+      } else toast.push(result.error);
+    });
+  }
+
+  function onToggleBlock(publicId: string, block: boolean) {
+    void socialActions.toggleBlock(publicId, block).then((result) => {
+      if (result.ok) {
+        setBlockedIds((current) => {
+          const next = new Set(current);
+          if (block) next.add(publicId);
+          else next.delete(publicId);
+          return next;
+        });
+      } else toast.push(result.error);
+    });
+  }
 
   // Search runs on the server; results join the cache that searchUsers() ranks.
   useEffect(() => {
@@ -219,17 +325,49 @@ export function PeopleHub({ me }: { me: SocialUser }) {
           <Card>
             <ul className="divide-y divide-cova-line" aria-label={t("people.results")}>
               {results.map((u) => (
-                <PersonRow key={u.id} user={u} meId={me.id} />
+                <PersonRow
+                  key={u.id}
+                  user={u}
+                  meId={me.id}
+                  following={followingIds.has(u.id)}
+                  blockedByMe={blockedIds.has(u.id)}
+                  onToggleFollow={onToggleFollow}
+                  onToggleBlock={onToggleBlock}
+                />
               ))}
             </ul>
           </Card>
         )
       ) : (
         <>
-          <PeopleList title="Friend requests" users={incoming} meId={me.id} />
-          <PeopleList title="Requests you sent" users={outgoing} meId={me.id} />
+          <PeopleList
+            title="Friend requests"
+            users={incoming}
+            meId={me.id}
+            followingIds={followingIds}
+            blockedIds={blockedIds}
+            onToggleFollow={onToggleFollow}
+            onToggleBlock={onToggleBlock}
+          />
+          <PeopleList
+            title="Requests you sent"
+            users={outgoing}
+            meId={me.id}
+            followingIds={followingIds}
+            blockedIds={blockedIds}
+            onToggleFollow={onToggleFollow}
+            onToggleBlock={onToggleBlock}
+          />
           {friends.length > 0 ? (
-            <PeopleList title={`Friends (${friends.length})`} users={friends} meId={me.id} />
+            <PeopleList
+              title={`Friends (${friends.length})`}
+              users={friends}
+              meId={me.id}
+              followingIds={followingIds}
+              blockedIds={blockedIds}
+              onToggleFollow={onToggleFollow}
+              onToggleBlock={onToggleBlock}
+            />
           ) : (
             <EmptyState
               icon={UserMinus}

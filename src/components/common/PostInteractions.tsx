@@ -1,28 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { MessageCircle, Send, ThumbsUp, Trash2, X } from "lucide-react";
+import { Bookmark, MessageCircle, Send, ThumbsUp, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useT } from "@/i18n/client";
 import type { TFunction } from "@/i18n/translate";
-import { getSupabase } from "@/lib/supabase/client";
+import { socialActions, useSocial } from "@/lib/social-store";
 import { cn } from "@/lib/utils";
 import type { SocialUser } from "@/types/social";
 
-type ReactionRow = { id: string; kind: string; user_id: string };
 type CommentRow = {
   id: string;
-  author_id: string;
-  parent_id: string | null;
+  authorId: string;
+  parentId: string | null;
   body: string;
-  created_at: string;
+  createdAt: string;
 };
 
 /**
- * Likes and threaded comments for a space post, backed by the
- * 20261115000004_social_interactions migration. If that migration has not
- * run yet (older database), the queries fail and the whole block hides
- * itself instead of breaking the feed.
+ * Likes, bookmarks and threaded comments for a space post, backed by the
+ * interactions migrations through social-store actions. If those migrations
+ * have not run yet (older database), the block hides itself quietly instead
+ * of breaking the feed.
  */
 export function PostInteractions({
   postId,
@@ -31,74 +30,56 @@ export function PostInteractions({
 }: {
   postId: string;
   users: Record<string, SocialUser>;
+  /** Public COVA code of the signed-in member, or "" when signed out. */
   meId: string;
 }) {
   const t = useT();
+  const social = useSocial();
   const [available, setAvailable] = useState(true);
-  const [reactions, setReactions] = useState<ReactionRow[]>([]);
+  const [likeCount, setLikeCount] = useState(0);
+  const [likedByMe, setLikedByMe] = useState(false);
+  const [bookmarked, setBookmarked] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Fetchers return data (or null on failure) instead of setting state, so the
-  // mount effects below stay free of synchronous setState calls.
-  const fetchReactions = useCallback(
-    async (id: string): Promise<ReactionRow[] | null> => {
-      const { data, error } = await getSupabase()
-        .from("post_reactions")
-        .select("id,kind,user_id")
-        .eq("post_id", id);
-      if (error) return null;
-      return (data ?? []) as ReactionRow[];
-    },
-    [],
-  );
-
-  const fetchComments = useCallback(
-    async (id: string): Promise<CommentRow[] | null> => {
-      const { data, error } = await getSupabase()
-        .from("post_comments")
-        .select("id,author_id,parent_id,body,created_at")
-        .eq("post_id", id)
-        .order("created_at", { ascending: true })
-        .limit(100);
-      if (error) return null;
-      return (data ?? []) as CommentRow[];
-    },
-    [],
-  );
+  // The fetcher returns data instead of setting state, so the mount effect
+  // stays free of synchronous setState calls (react-hooks rule).
+  const fetchState = useCallback(async (): Promise<{
+    likeCount: number;
+    likedByMe: boolean;
+    bookmarked: boolean;
+    comments: CommentRow[];
+  } | null> => {
+    const result = await socialActions.loadPostInteractions(postId);
+    if (!result.ok) return null;
+    return result.value;
+  }, [postId]);
 
   useEffect(() => {
+    if (!social.ready) return;
     let cancelled = false;
-    void fetchReactions(postId).then((rows) => {
+    void fetchState().then((state) => {
       if (cancelled) return;
-      if (rows === null) setAvailable(false);
-      else setReactions(rows);
+      if (state === null) {
+        setAvailable(false);
+        return;
+      }
+      setLikeCount(state.likeCount);
+      setLikedByMe(state.likedByMe);
+      setBookmarked(state.bookmarked);
+      setComments(state.comments);
     });
     return () => {
       cancelled = true;
     };
-  }, [postId, fetchReactions]);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void fetchComments(postId).then((rows) => {
-      if (cancelled) return;
-      if (rows === null) setAvailable(false);
-      else setComments(rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, postId, fetchComments]);
+  }, [social.ready, fetchState]);
 
   if (!available) return null;
 
-  const likedByMe = meId !== "" && reactions.some((r) => r.user_id === meId && r.kind === "like");
-  const topLevel = comments.filter((c) => c.parent_id === null);
+  const topLevel = comments.filter((c) => c.parentId === null);
 
   function nameOf(authorId: string): string {
     return users[authorId]?.displayName ?? authorId.slice(0, 8);
@@ -106,54 +87,48 @@ export function PostInteractions({
 
   async function toggleLike() {
     if (meId === "" || busy) return;
-    const mine = reactions.find((r) => r.user_id === meId && r.kind === "like");
     setBusy(true);
     try {
-      const supabase = getSupabase();
-      if (mine) {
-        const { error } = await supabase.from("post_reactions").delete().eq("id", mine.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("post_reactions").insert({ post_id: postId, kind: "like" });
-        if (error) throw error;
+      const result = await socialActions.togglePostLike(postId);
+      if (!result.ok) return;
+      const state = await fetchState();
+      if (state) {
+        setLikeCount(state.likeCount);
+        setLikedByMe(state.likedByMe);
       }
-      const rows = await fetchReactions(postId);
-      if (rows !== null) setReactions(rows);
-    } catch {
-      /* the next refresh reconciles; keep the feed usable */
     } finally {
       setBusy(false);
     }
+  }
+
+  async function toggleBookmark() {
+    if (meId === "" || busy) return;
+    const next = !bookmarked;
+    setBookmarked(next);
+    const result = await socialActions.togglePostBookmark(postId, next);
+    if (!result.ok) setBookmarked(!next);
   }
 
   async function submitComment() {
     if (meId === "" || busy || draft.trim().length === 0) return;
     setBusy(true);
     try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from("post_comments").insert({
-        post_id: postId,
-        parent_id: replyTo,
-        body: draft.trim(),
-      });
-      if (error) throw error;
+      const result = await socialActions.addPostComment(postId, draft.trim(), replyTo);
+      if (!result.ok) return;
       setDraft("");
       setReplyTo(null);
-      const rows = await fetchComments(postId);
-      if (rows !== null) setComments(rows);
-    } catch {
-      /* keep the composer open on failure */
+      const state = await fetchState();
+      if (state) setComments(state.comments);
     } finally {
       setBusy(false);
     }
   }
 
   async function removeComment(id: string) {
-    const supabase = getSupabase();
-    const { error } = await supabase.from("post_comments").delete().eq("id", id);
-    if (!error) {
-      const rows = await fetchComments(postId);
-      if (rows !== null) setComments(rows);
+    const result = await socialActions.deletePostComment(id);
+    if (result.ok) {
+      const state = await fetchState();
+      if (state) setComments(state.comments);
     }
   }
 
@@ -174,7 +149,7 @@ export function PostInteractions({
           )}
         >
           <ThumbsUp className={cn("h-4.5 w-4.5", likedByMe && "fill-current")} aria-hidden="true" />
-          {reactions.length > 0 && <span>{reactions.length}</span>}
+          {likeCount > 0 && <span>{likeCount}</span>}
         </button>
         <button
           type="button"
@@ -184,6 +159,22 @@ export function PostInteractions({
           <MessageCircle className="h-4.5 w-4.5" aria-hidden="true" />
           {topLevel.length > 0 && <span>{topLevel.length}</span>}
         </button>
+        {meId !== "" && (
+          <button
+            type="button"
+            onClick={() => void toggleBookmark()}
+            aria-pressed={bookmarked}
+            aria-label={t("saved.title")}
+            className={cn(
+              "ml-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm",
+              bookmarked
+                ? "font-medium text-cova-ink"
+                : "text-cova-mute hover:bg-cova-pale hover:text-cova-ink",
+            )}
+          >
+            <Bookmark className={cn("h-4.5 w-4.5", bookmarked && "fill-current")} aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {open && (
@@ -192,7 +183,7 @@ export function PostInteractions({
             <p className="text-xs text-cova-mute">{t("interact.empty")}</p>
           )}
           {topLevel.map((comment) => {
-            const replies = comments.filter((c) => c.parent_id === comment.id);
+            const replies = comments.filter((c) => c.parentId === comment.id);
             return (
               <div key={comment.id} className="space-y-1">
                 <CommentBubble
@@ -225,18 +216,18 @@ export function PostInteractions({
             );
           })}
 
-          {meId !== "" ? (
-            replyTo ? (
-              <div className="flex items-center justify-between rounded-lg bg-cova-pale px-3 py-1.5 text-xs text-cova-mute">
-                <span>
-                  {t("interact.replyingTo", { name: nameOf(comments.find((c) => c.id === replyTo)?.author_id ?? "") })}
-                </span>
-                <button type="button" onClick={() => setReplyTo(null)} aria-label={t("dm.cancel")}>
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            ) : null
-          ) : null}
+          {meId !== "" && replyTo && (
+            <div className="flex items-center justify-between rounded-lg bg-cova-pale px-3 py-1.5 text-xs text-cova-mute">
+              <span>
+                {t("interact.replyingTo", {
+                  name: nameOf(comments.find((c) => c.id === replyTo)?.authorId ?? ""),
+                })}
+              </span>
+              <button type="button" onClick={() => setReplyTo(null)} aria-label={t("dm.cancel")}>
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
 
           {meId !== "" && (
             <div className="flex items-end gap-2">
@@ -283,10 +274,10 @@ function CommentBubble({
     <div className="rounded-2xl bg-cova-pale px-3 py-2">
       <p className="text-xs text-cova-mute">
         <span className="font-medium text-cova-ink">
-          {comment.author_id === meId ? t("groupDetail.you") : nameOf(comment.author_id)}
+          {comment.authorId === meId ? t("groupDetail.you") : nameOf(comment.authorId)}
         </span>
         {" · "}
-        {new Date(comment.created_at).toLocaleString(undefined, {
+        {new Date(comment.createdAt).toLocaleString(undefined, {
           day: "numeric",
           month: "short",
           hour: "2-digit",
@@ -298,7 +289,7 @@ function CommentBubble({
         <button type="button" className="hover:underline" onClick={onReply}>
           {t("interact.reply")}
         </button>
-        {comment.author_id === meId && (
+        {comment.authorId === meId && (
           <button
             type="button"
             className="inline-flex items-center gap-1 hover:underline"

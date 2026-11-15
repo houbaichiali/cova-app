@@ -46,6 +46,7 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   assignment_created: ClipboardList,
   assignment_graded: ClipboardCheck,
   new_message: MessageSquare,
+  new_follower: UserPlus,
   deadline_reminder: AlarmClock,
   badge_unlocked: Medal,
   level_up: TrendingUp,
