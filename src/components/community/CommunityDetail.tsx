@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Globe, Lock, SearchX, Trash2, UserPlus, Users } from "lucide-react";
 import { MediaComposer } from "@/components/common/MediaComposer";
 import { PostAttachments } from "@/components/common/PostAttachments";
+import { PostInteractions } from "@/components/common/PostInteractions";
 import { ReportButton } from "@/components/common/ReportButton";
 import { SharePanel } from "@/components/common/SharePanel";
 import {
@@ -425,6 +426,7 @@ export function CommunityDetail({
                           <p className="mt-1 whitespace-pre-line break-words text-sm">{p.text}</p>
                         )}
                         <PostAttachments attachments={p.attachments} />
+                        <PostInteractions postId={p.id} users={social.users} meId={meId} />
                       </div>
                       {p.authorId !== meId && (
                         <ReportButton
