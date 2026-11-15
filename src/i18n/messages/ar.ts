@@ -432,6 +432,7 @@ export const ar: Record<MessageKey, string> = {
   "collab.requestSent": "تم إرسال الدعوة.",
   "notif.qa_answer": "أجاب {actor} عن سؤالك: {text}",
   "notif.collab_accepted": "قبل {actor}: {text}",
+  "notif.badge_rank": "تم الحصول على رتبة شارة: {text} (الرتبة {detail})",
   "nav.friends": "الأصدقاء",
   "nav.profile": "ملفي الشخصي",
   "common.signin": "تسجيل الدخول",

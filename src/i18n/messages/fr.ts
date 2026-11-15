@@ -451,6 +451,7 @@ export const fr: Record<MessageKey, string> = {
   "collab.requestSent": "Invitation envoyée.",
   "notif.qa_answer": "{actor} a répondu à ta question : {text}",
   "notif.collab_accepted": "{actor} a accepté : {text}",
+  "notif.badge_rank": "Rang de badge obtenu : {text} (rang {detail})",
   "nav.friends": "Amis",
   "nav.profile": "Mon profil",
   "common.signin": "Se connecter",

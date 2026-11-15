@@ -446,6 +446,7 @@ export const en = {
   "collab.requestSent": "Invitation sent.",
   "notif.qa_answer": "{actor} answered your question: {text}",
   "notif.collab_accepted": "{actor} accepted: {text}",
+  "notif.badge_rank": "Badge rank earned: {text} (rank {detail})",
   "nav.friends": "Friends",
   "nav.profile": "My profile",
   "common.signin": "Sign in",

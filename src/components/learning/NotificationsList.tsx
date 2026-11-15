@@ -50,6 +50,7 @@ const KIND_ICONS: Record<string, LucideIcon> = {
   new_follower: UserPlus,
   qa_answer: MessageSquare,
   collab_accepted: Heart,
+  badge_rank: Medal,
   deadline_reminder: AlarmClock,
   badge_unlocked: Medal,
   level_up: TrendingUp,

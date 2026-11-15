@@ -29,6 +29,7 @@ const KIND_KEYS: Record<string, MessageKey> = {
   new_follower: "notif.new_follower",
   qa_answer: "notif.qa_answer",
   collab_accepted: "notif.collab_accepted",
+  badge_rank: "notif.badge_rank",
 };
 
 /** Kinds whose `detail` (course name) may be empty and then read better without it. */
