@@ -2606,4 +2606,54 @@ export const socialActions = {
     const { error } = await s.value.sb.from("user_blocks").insert({ blocked_id: other });
     return error ? fail(describe(error)) : ok(undefined);
   },
+
+  /** Invites someone as a study partner or mentor (collab_requests). */
+  async requestCollab(otherPublicId: string, kind: "study_partner" | "mentor"): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const other = await resolveUuid(s.value.sb, otherPublicId);
+    if (!other) return fail("Profile not found.");
+    if (other === s.value.me) return fail("You cannot invite yourself.");
+    const { error } = await s.value.sb.from("collab_requests").insert({ target_id: other, kind });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  /** Adds or removes the caller's +1 on a Q&A question or answer. */
+  async qaVote(targetType: "question" | "answer", targetId: string): Promise<ActionResult> {
+    const s = await session();
+    if (!s.ok) return fail(s.error);
+    const existing = await s.value.sb
+      .from("qa_votes")
+      .select("target_id")
+      .eq("user_id", s.value.me)
+      .eq("target_type", targetType)
+      .eq("target_id", targetId)
+      .maybeSingle();
+    if (existing.error) return fail(describe(existing.error));
+    if (existing.data) {
+      const { error } = await s.value.sb
+        .from("qa_votes")
+        .delete()
+        .eq("user_id", s.value.me)
+        .eq("target_type", targetType)
+        .eq("target_id", targetId);
+      return error ? fail(describe(error)) : ok(undefined);
+    }
+    const { error } = await s.value.sb
+      .from("qa_votes")
+      .insert({ target_type: targetType, target_id: targetId, value: 1 });
+    return error ? fail(describe(error)) : ok(undefined);
+  },
+
+  /** Target ids the caller voted on (uuids are compared inside the store). */
+  async qaMyVotes(): Promise<ActionResult<string[]>> {
+    const s = await session();
+    if (!s.ok) return ok([]);
+    const { data, error } = await s.value.sb
+      .from("qa_votes")
+      .select("target_id")
+      .eq("user_id", s.value.me);
+    if (error) return fail(describe(error));
+    return ok((data ?? []).map((r) => (r as { target_id: string }).target_id));
+  },
 };
