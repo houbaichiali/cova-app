@@ -107,3 +107,27 @@ Invariants : jamais de recalcul de `profiles.xp` depuis le ledger ; clés d'év�
 ## 10. Ordre d'exécution et dépendances
 
 Phase 1 (sécurité) → Phase 2 (fondations groupes + signalement) → Phase 3 (interactions) → Phase 4 (Q&A/collaboration) → Phase 5 (moteur Reward Rules + séparation Global XP / Skill Trophies) → Phase 6 (suppression de la saisie manuelle dans les formulaires) → Phase 7 (Admin Reward Rules) → Phase 8 (refonte badges 8 rangs) → Phase 9 (Admin Badge Management) → Phase 10 (Coding Lab/Coding Mastery) → Phase 11 (intégration) → Phase 12 (validation finale). Les phases 5/6/7 dépendent de la réconciliation de schéma (Phase 1) et du registre langages ; la Phase 10 dépend du moteur (Phase 5) ; la Phase 11 dépend de tout le reste.
+
+## 11. État d'implémentation (Phase 12)
+
+Statut après exécution des phases 0 → 12 sur la branche `feat/community-rewards-badges-overhaul` (13 commits, base c17cc20) :
+
+| Phase | Contenu livré | Migrations |
+|---|---|---|
+| 0 | Audit + plan (ce document) | — |
+| 1 | Buckets médias privés (25 Mo), sanctions serveur, revoke quiz_grant_xp, portfolio UPDATE, XP défis dans le ledger, réconciliation espaces | `20261115000001`–`000002` |
+| 2 | Signalement élève (`report_content`), départ/rôles/membres/suppression de groupe, rang dashboard réel, 19 kinds notifiés, cron préférences | `20261115000003` |
+| 3a | Réactions (4 types), commentaires imbriqués, blocage bidirectionnel RLS | `20261115000004` |
+| 3b | Abonnements + notifications, marque-pages privés + page /saved, UI bloquer/suivre | `20261115000005` |
+| 4 | Q&A (votes, meilleure réponse atomique par RPC), partenaires/mentorat | `20261115000006` |
+| 5 | Moteur Reward Rules : `reward_rules` + `grant_activity_reward` (idempotent, Global XP + Skill Trophies), registre 13 langages, `admin_rules_save` + historique | `20261115000007` |
+| 6 | Fin de la saisie manuelle : `challenges.points` dérivé serveur (trigger), `submit_challenge` payé par règles (crédit partiel conservé, repli legacy), champ points retiré des formulaires défi/devoir externe (devoir externe noté /100 fixe) | `20261115000008` |
+| 7 | Module Admin « Reward rules » (`/admin/reward-rules`, permission `gamification.rules.manage`) | — |
+| 8 | Badges : `visibility_mode` (public/privé/caché), échelle de 8 rangs par badge (`ranks` jsonb), `badge_rank_awards` + XP ledger + notifications, triggers sur les 5 événements du moteur de badges, seed bookworm (10→1600) | `20261115000009` |
+| 9 | Admin Badge Management : éditeur visibilité + paliers JSON avec validation SQL, `admin_badge_save/list` étendus (compat. conservée) | `20261115000010` |
+| 10 | Coding Lab : `coding_attempts` (1 par devoir, idempotent), trophée par langage via le moteur, `my_coding_mastery()` (8 niveaux), panneau Maîtrise dans Coding Lab | `20261115000011` |
+| 11 | Câblage : devoirs (soumission → 25 XP), leçons (complétion → 10 XP), réponses Q&A (→ 5 XP) via le moteur ; préférences notifications étendues aux nouveaux kinds | `20261115000012` |
+
+**Chemins de récompenses restés hors moteur (choix documentés)** : XP quiz (déjà serveur, config par quiz via quiz_settings — à migrer si souhaité), ajustements XP admin (outil légitime), XP de badges (`badge:<key>` via `xp_reward`, piloté par la config badge = légitime). **Jamais exécuté en production ; aucune base contactée ; `profiles.xp` jamais recalculé depuis le ledger.**
+
+**Tests** : harnais SQL étendu de 40 à 90 (`40`, `50`, `55`, `60`, `65`, `70`, `75`, `80`, `85`, `90` — ~110 vérifications additionnelles, **non exécutées ici faute de PostgreSQL**, commandes dans chaque en-tête) ; typecheck/lint/build/i18n/XP 29-29 verts à chaque commit.
