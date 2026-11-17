@@ -306,6 +306,29 @@ html.dark {
   }
 }
 
+/* Badge rank-up shine: a soft highlight sweeping over the current-rank trophy. */
+@keyframes cova-badge-shine {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 255 255 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgb(255 255 255 / 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 255 255 / 0.35);
+  }
+}
+
+.cova-badge-shine {
+  animation: cova-badge-shine 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cova-badge-shine {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------------ COVA QUIZ */
 /* Entrance animations for the game screens. They use plain transforms so the
    global prefers-reduced-motion rule above flattens them automatically. */
