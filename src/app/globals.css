@@ -915,3 +915,67 @@ html[data-palette="mono-creative"].dark {
   --color-admin-navy: #191919;
   --coding-neon: #ff754f;
 }
+
+/* ------------------------------------------------- coding lab neon border
+   Exclusive to the Coding Lab cards: a light beam travels along the card
+   border on hover — a conic-gradient masked down to a 1px ring, so it never
+   covers the content. The beam color follows the active palette through
+   --coding-neon (defined per palette above). Desktop fine pointers only,
+   keyboard focus gets the same treatment, prefers-reduced-motion keeps a
+   static ring instead of the rotation, and browsers without @property simply
+   show the static ring. */
+@property --neon-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.cova-neon-card {
+  position: relative;
+  isolation: isolate;
+}
+
+.cova-neon-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--neon-angle),
+    transparent 0deg,
+    var(--coding-neon) 80deg,
+    transparent 120deg
+  );
+  opacity: 0;
+  transition: opacity 250ms ease;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes neon-rotate {
+  to {
+    --neon-angle: 360deg;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cova-neon-card:hover::before,
+  .cova-neon-card:focus-visible::before {
+    opacity: 1;
+    animation: neon-rotate 3s linear infinite;
+  }
+}
+
+/* Reduced motion: the ring still appears on hover (a static accent, not an
+   animation) but the beam stops rotating. */
+@media (prefers-reduced-motion: reduce) {
+  .cova-neon-card:hover::before,
+  .cova-neon-card:focus-visible::before {
+    animation: none;
+  }
+}

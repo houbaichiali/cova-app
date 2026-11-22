@@ -534,7 +534,7 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
         <StaggerGroup className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" stagger={0.05}>
           {LANGUAGES.map((item, index) => (
             <StaggerItem key={item.id}>
-              <button type="button" onClick={() => chooseLanguage(item.id)} aria-pressed={languageId === item.id} className={`min-h-28 w-full rounded-xl border bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm ${languageId === item.id ? "border-cova-soft ring-2 ring-cova-soft" : "border-cova-line"}`}>
+              <button type="button" onClick={() => chooseLanguage(item.id)} aria-pressed={languageId === item.id} className={`cova-neon-card min-h-28 w-full rounded-xl border bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm ${languageId === item.id ? "border-cova-soft ring-2 ring-cova-soft" : "border-cova-line"}`}>
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">{item.id === "typescript" ? "TS" : item.id === "javascript" ? "JS" : item.id === "csharp" ? "C#" : item.id === "cpp" ? "C++" : item.id.toUpperCase().slice(0, 2)}</span>
                 <span className="mt-3 block font-semibold">{languageLabel(item.id)}</span>
                 <span className="mt-1 block font-mono text-xs text-cova-mute">.{item.extension}</span>
@@ -544,7 +544,7 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
             </StaggerItem>
           ))}
           <StaggerItem>
-            <button type="button" onClick={() => setJupyterOpen(true)} className="min-h-28 w-full rounded-xl border border-cova-line bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm">
+            <button type="button" onClick={() => setJupyterOpen(true)} className="cova-neon-card min-h-28 w-full rounded-xl border border-cova-line bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">Jp</span>
               <span className="mt-3 block font-semibold">Jupyter Notebook</span>
               <span className="mt-1 block font-mono text-xs text-cova-mute">.ipynb</span>
