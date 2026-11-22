@@ -92,6 +92,10 @@ const TOKENS = [
   "color-admin-navy",
 ] as const;
 
+/* Defined in @theme (white) and overridden in every dark block — light palette
+   blocks inherit the @theme value by design. */
+const DARK_EXTRA = ["color-cova-on-primary"] as const;
+
 for (const id of PALETTE_IDS) {
   if (id === "soft-blue") continue; // default: lives in @theme / html.dark
   const light = block(`html[data-palette="${id}"]`);
@@ -100,6 +104,8 @@ for (const id of PALETTE_IDS) {
   check(`palette "${id}" has a dark block`, dark !== null);
   for (const name of TOKENS) {
     check(`palette "${id}" light defines --${name}`, light !== null && token(light, name) !== null);
+  }
+  for (const name of [...TOKENS, ...DARK_EXTRA]) {
     check(`palette "${id}" dark defines --${name}`, dark !== null && token(dark, name) !== null);
   }
   check(`palette "${id}" light defines --coding-neon`, light !== null && token(light, "coding-neon") !== null);
@@ -113,7 +119,7 @@ const themeBlock = css.match(/@theme\s*\{([^}]*)\}/)?.[1] ?? null;
 const darkBlock = block("html.dark");
 check("@theme block exists", themeBlock !== null);
 check("html.dark block exists", darkBlock !== null);
-for (const name of TOKENS) {
+for (const name of [...TOKENS, ...DARK_EXTRA]) {
   check(`@theme (soft-blue light) defines --${name}`, themeBlock !== null && token(themeBlock, name) !== null);
   check(`html.dark (soft-blue dark) defines --${name}`, darkBlock !== null && token(darkBlock, name) !== null);
 }

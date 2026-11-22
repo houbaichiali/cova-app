@@ -36,7 +36,7 @@ export function BadgeCard({ achievement, onOpen, pinnable = false, pinned = fals
         aria-haspopup="dialog"
         className={cn(
           "group flex w-full flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-transform",
-          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cova-ink",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cova-focus",
           unlocked ? "border-cova-line bg-white hover:scale-[1.02]" : "border-cova-line bg-cova-bg opacity-70 grayscale",
         )}
       >

@@ -20,6 +20,9 @@
   --color-cova-surface: #ffffff;
   --color-cova-elevated: #ffffff;
   --color-cova-primary: #3e6c99;
+  /* Readable label on solid primary surfaces: white in light palettes, the
+     dark surface tone in dark palettes (dark primaries are light colors). */
+  --color-cova-on-primary: #ffffff;
   --color-cova-accent: #6f9fba;
   --color-cova-success: #2f9e44;
   --color-cova-warning: #b45309;
@@ -172,6 +175,7 @@ html.dark {
   --color-cova-surface: #101b2d;
   --color-cova-elevated: #17253a;
   --color-cova-primary: #8fb8d9;
+  --color-cova-on-primary: #0b1220;
   --color-cova-accent: #6f9fba;
   --color-cova-success: #4fc968;
   --color-cova-warning: #fcc419;
@@ -279,7 +283,7 @@ html.dark {
   position: absolute;
   inset: auto 0 0 0;
   height: 0;
-  background: #33627a;
+  background: var(--color-cova-muted);
   transition: height 0.3s ease;
 }
 
@@ -336,7 +340,7 @@ html.dark {
 
 .dlb.done {
   width: 96px;
-  border-color: #2fae43;
+  border-color: var(--color-cova-success);
 }
 
 .dlb.done .dlb__circle {
@@ -347,7 +351,7 @@ html.dark {
 .dlb.done .dlb__title {
   inset-inline: 0;
   text-align: center;
-  color: #2fae43;
+  color: var(--color-cova-success);
   font-weight: 600;
 }
 
@@ -504,6 +508,7 @@ html[data-palette="three-blue"].dark {
   --color-cova-surface: #14212f;
   --color-cova-elevated: #1c2c3d;
   --color-cova-primary: #6fb1e0;
+  --color-cova-on-primary: #0c1520;
   --color-cova-accent: #5aa9dc;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -549,6 +554,7 @@ html[data-palette="academic-tech-premium"].dark {
   --color-cova-surface: #1a212b;
   --color-cova-elevated: #232c38;
   --color-cova-primary: #93b0d0;
+  --color-cova-on-primary: #12161d;
   --color-cova-accent: #9d8ff0;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -593,6 +599,7 @@ html[data-palette="forest-copper"].dark {
   --color-cova-surface: #19221b;
   --color-cova-elevated: #222d23;
   --color-cova-primary: #7fbd85;
+  --color-cova-on-primary: #111813;
   --color-cova-accent: #d8925d;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -637,6 +644,7 @@ html[data-palette="midnight-lavender"].dark {
   --color-cova-surface: #1c192b;
   --color-cova-elevated: #262238;
   --color-cova-primary: #a58fe0;
+  --color-cova-on-primary: #13111e;
   --color-cova-accent: #b593f2;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -681,6 +689,7 @@ html[data-palette="arctic-minimal"].dark {
   --color-cova-surface: #171d21;
   --color-cova-elevated: #20282d;
   --color-cova-primary: #74b3d6;
+  --color-cova-on-primary: #0f1417;
   --color-cova-accent: #58b8d4;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -725,6 +734,7 @@ html[data-palette="burgundy-champagne"].dark {
   --color-cova-surface: #261a1f;
   --color-cova-elevated: #302329;
   --color-cova-primary: #cf7f95;
+  --color-cova-on-primary: #1b1216;
   --color-cova-accent: #d9b87e;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -769,6 +779,7 @@ html[data-palette="sage-stone"].dark {
   --color-cova-surface: #1d201b;
   --color-cova-elevated: #262a24;
   --color-cova-primary: #8fb28a;
+  --color-cova-on-primary: #141613;
   --color-cova-accent: #b3a089;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -813,6 +824,7 @@ html[data-palette="sand-terracotta"].dark {
   --color-cova-surface: #271e18;
   --color-cova-elevated: #31261e;
   --color-cova-primary: #dc8f63;
+  --color-cova-on-primary: #1c1410;
   --color-cova-accent: #e6905c;
   --color-cova-success: #51cf66;
   --color-cova-warning: #fcc419;
@@ -858,6 +870,7 @@ html[data-palette="graphite-mint"].dark {
   --color-cova-surface: #181d20;
   --color-cova-elevated: #22282c;
   --color-cova-primary: #8298a5;
+  --color-cova-on-primary: #101315;
   --color-cova-accent: #2ee6ac;
   --color-cova-success: #2ee6ac;
   --color-cova-warning: #fcc419;
@@ -905,6 +918,7 @@ html[data-palette="mono-creative"].dark {
   --color-cova-surface: #191919;
   --color-cova-elevated: #292929;
   --color-cova-primary: #ececea;
+  --color-cova-on-primary: #090909;
   --color-cova-accent: #ff754f;
   --color-cova-success: #4fc968;
   --color-cova-warning: #fcc419;
