@@ -13,6 +13,7 @@ export const en = {
   "nav.courses": "Courses",
   "nav.assignments": "Assignments",
   "nav.coding": "Coding Lab",
+  "nav.toggleSidebar": "Toggle navigation",
   "coding.pageDescription":
     "Choose a language, edit a local project and run supported code in your browser.",
   "coding.languages": "Choose a language",

@@ -12,6 +12,7 @@ export const fr: Record<MessageKey, string> = {
   "nav.courses": "Cours",
   "nav.assignments": "Devoirs",
   "nav.coding": "Labo de code",
+  "nav.toggleSidebar": "Basculer la navigation",
   "coding.pageDescription":
     "Choisissez un langage, modifiez un projet local et exécutez dans le navigateur les langages compatibles.",
   "coding.languages": "Choisir un langage",

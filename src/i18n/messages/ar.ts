@@ -12,6 +12,7 @@ export const ar: Record<MessageKey, string> = {
   "nav.courses": "الدورات",
   "nav.assignments": "الواجبات",
   "nav.coding": "مختبر البرمجة",
+  "nav.toggleSidebar": "تبديل التنقل",
   "coding.pageDescription": "اختر لغة، وعدّل مشروعًا محليًا، وشغّل اللغات المدعومة في المتصفح.",
   "coding.languages": "اختر لغة",
   "coding.workspace": "مساحة البرمجة",
