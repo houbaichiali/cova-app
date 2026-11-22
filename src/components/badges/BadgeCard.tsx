@@ -1,9 +1,11 @@
 "use client";
 
 import { Lock, Pin, PinOff, Trophy } from "lucide-react";
+import { motion } from "motion/react";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useS } from "@/i18n/spaces";
 import { cn } from "@/lib/utils";
+import { layoutTransition } from "@/lib/motion";
 import { rankName, rankStyle, rarityStyle, RANK_COUNT } from "@/lib/badge-ranks";
 import type { Achievement } from "@/lib/badge-collection";
 
@@ -39,7 +41,11 @@ export function BadgeCard({ achievement, onOpen, pinnable = false, pinned = fals
         )}
       >
         <span className="relative">
-          <span
+          {/* Shared element with the detail modal hero: the trophy circle
+              morphs from the card into the modal (spatial continuity). */}
+          <motion.span
+            layoutId={`badge-trophy-${achievement.key}`}
+            transition={layoutTransition}
             className={cn(
               "flex h-14 w-14 items-center justify-center rounded-full shadow-inner",
               unlocked ? cn("bg-gradient-to-br", style.gradient) : "bg-cova-pale text-cova-mute",
@@ -51,7 +57,7 @@ export function BadgeCard({ achievement, onOpen, pinnable = false, pinned = fals
             ) : (
               <Lock className="h-5 w-5" />
             )}
-          </span>
+          </motion.span>
           {unlocked && achievement.currentRank !== null && achievement.currentRank > 1 && (
             <span
               className={cn(

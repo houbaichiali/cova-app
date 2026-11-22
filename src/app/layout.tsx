@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Manrope, Playfair_Display } from "next/font/google";
+import { MotionProvider } from "@/components/ui/Motion";
 import { ToastProvider } from "@/components/ui/Toast";
 import { I18nProvider } from "@/i18n/client";
 import { LOCALE_DIR } from "@/i18n/config";
@@ -40,7 +41,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="bg-cova-bg text-cova-ink antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <I18nProvider initialLocale={locale}>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <MotionProvider>{children}</MotionProvider>
+          </ToastProvider>
         </I18nProvider>
       </body>
     </html>

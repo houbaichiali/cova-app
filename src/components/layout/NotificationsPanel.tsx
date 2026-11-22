@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import { Bell } from "lucide-react";
+import { motion } from "motion/react";
 import { useT } from "@/i18n/client";
 import { notificationSentence } from "@/lib/notifications";
 import { formatWhen, socialActions, useSocial } from "@/lib/social-store";
 import { useOutsideClose } from "@/lib/use-outside-close";
+import { fadeUp, makeStagger } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 export function NotificationsPanel() {
@@ -53,11 +55,16 @@ export function NotificationsPanel() {
               {t("notif.markAll")}
             </button>
           </div>
-          <ul className="max-h-80 divide-y divide-cova-line overflow-y-auto">
+          <motion.ul
+            variants={makeStagger(0.06)}
+            initial="hidden"
+            animate="visible"
+            className="max-h-80 divide-y divide-cova-line overflow-y-auto"
+          >
             {notifications.slice(0, 5).map((n) => {
               const isUnread = n.readAt === null;
               return (
-                <li key={n.id}>
+                <motion.li key={n.id} variants={fadeUp}>
                   <Link
                     href={n.href ?? "/notifications"}
                     onClick={() => {
@@ -73,7 +80,7 @@ export function NotificationsPanel() {
                     </p>
                     <p className="mt-1 text-xs text-cova-mute">{formatWhen(n.at)}</p>
                   </Link>
-                </li>
+                </motion.li>
               );
             })}
             {notifications.length === 0 && (
@@ -81,7 +88,7 @@ export function NotificationsPanel() {
                 {social.ready ? t("notif.empty") : t("notif.signin")}
               </li>
             )}
-          </ul>
+          </motion.ul>
           <Link
             href="/notifications"
             onClick={() => setOpen(false)}

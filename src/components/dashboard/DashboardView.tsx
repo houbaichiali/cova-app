@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { StatCard } from "@/components/dashboard/StatCard";
+import { StaggerGroup, StaggerItem } from "@/components/ui/Motion";
 import { ContinueLearning } from "@/components/dashboard/ContinueLearning";
 import { UpcomingAssignments } from "@/components/dashboard/UpcomingAssignments";
 import { DailyChallengeCard } from "@/components/dashboard/DailyChallengeCard";
@@ -265,50 +266,58 @@ export function DashboardView() {
         </CardBody>
       </Card>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={Flame}
-          label={t("dashboard.totalXp")}
-          value={xp.toLocaleString(formatTag)}
-        />
+      <StaggerGroup className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" stagger={0.06}>
+        <StaggerItem>
+          <StatCard
+            icon={Flame}
+            label={t("dashboard.totalXp")}
+            value={xp.toLocaleString(formatTag)}
+          />
+        </StaggerItem>
 
-        <StatCard
-          icon={Trophy}
-          label={t("dashboard.leaderboardRank")}
-          value={
-            leaderboardLoading
-              ? "..."
-              : leaderboardRank !== null
-                ? `#${leaderboardRank}`
-                : "—"
-          }
-          detail={
-            leaderboardLoading
-              ? t("dashboard.loadingRanking")
-              : leaderboardRank !== null
-                ? t("dashboard.realRanking")
-                : t("dashboard.rankingUnavailable")
-          }
-        />
+        <StaggerItem>
+          <StatCard
+            icon={Trophy}
+            label={t("dashboard.leaderboardRank")}
+            value={
+              leaderboardLoading
+                ? "..."
+                : leaderboardRank !== null
+                  ? `#${leaderboardRank}`
+                  : "—"
+            }
+            detail={
+              leaderboardLoading
+                ? t("dashboard.loadingRanking")
+                : leaderboardRank !== null
+                  ? t("dashboard.realRanking")
+                  : t("dashboard.rankingUnavailable")
+            }
+          />
+        </StaggerItem>
 
-        <StatCard
-          icon={BookOpen}
-          label={t("dashboard.lessonsCompleted")}
-          value={
-            learningLoading ? "..." : String(completedLessons.length)
-          }
-        />
+        <StaggerItem>
+          <StatCard
+            icon={BookOpen}
+            label={t("dashboard.lessonsCompleted")}
+            value={
+              learningLoading ? "..." : String(completedLessons.length)
+            }
+          />
+        </StaggerItem>
 
-        <StatCard
-          icon={Award}
-          label={t("dashboard.challengesDone")}
-          value={
-            learningLoading
-              ? "..."
-              : String(challengesDone ?? state.completedChallenges.length)
-          }
-        />
-      </div>
+        <StaggerItem>
+          <StatCard
+            icon={Award}
+            label={t("dashboard.challengesDone")}
+            value={
+              learningLoading
+                ? "..."
+                : String(challengesDone ?? state.completedChallenges.length)
+            }
+          />
+        </StaggerItem>
+      </StaggerGroup>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
