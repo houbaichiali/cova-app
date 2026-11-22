@@ -1,10 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { Manrope, Playfair_Display } from "next/font/google";
 import { ToastProvider } from "@/components/ui/Toast";
 import { I18nProvider } from "@/i18n/client";
 import { LOCALE_DIR } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
 import "./globals.css";
+
+// Interface face + editorial display face, self-hosted by next/font (no
+// external font request at runtime, no layout shift).
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfair", display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "COVA — Community Of Visionary Achievers", template: "%s · COVA" },
@@ -25,7 +31,12 @@ const themeInitScript = `try{var ok=["soft-blue","three-blue","academic-tech-pre
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   return (
-    <html lang={locale} dir={LOCALE_DIR[locale]} suppressHydrationWarning>
+    <html
+      lang={locale}
+      dir={LOCALE_DIR[locale]}
+      className={`${manrope.variable} ${playfair.variable}`}
+      suppressHydrationWarning
+    >
       <body className="bg-cova-bg text-cova-ink antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <I18nProvider initialLocale={locale}>
