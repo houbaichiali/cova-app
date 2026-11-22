@@ -4,6 +4,7 @@ import { Palette, Users, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { PalettePicker } from "@/components/ui/PalettePicker";
 import { Switch } from "@/components/ui/Switch";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useT } from "@/i18n/client";
@@ -101,6 +102,21 @@ export function SettingsForm() {
               ]}
             />
           </PrefRow>
+          {/* The palette grid breaks out of the row layout: it needs the width. */}
+          <div className="py-3">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cova-pale">
+                <Palette className="h-4 w-4 text-cova-muted" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-cova-ink">{t("settings.palette")}</p>
+                <p className="mt-0.5 text-sm text-cova-mute">{t("settings.paletteDesc")}</p>
+              </div>
+            </div>
+            <div className="mt-3">
+              <PalettePicker />
+            </div>
+          </div>
           <PrefRow icon={Palette} label={t("lang.label")} description={t("lang.description")}>
             <LanguageSwitcher />
           </PrefRow>

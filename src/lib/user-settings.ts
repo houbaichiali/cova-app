@@ -3,10 +3,13 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
+  applyPalette,
   applyTextSize,
   applyTheme,
   getAppliedTheme,
+  getStoredPalette,
   getStoredTextSize,
+  type Palette,
   type TextSize,
   type Theme,
 } from "@/lib/theme";
@@ -23,6 +26,7 @@ export type InfoVisibility = "everyone" | "friends" | "nobody";
  */
 export interface UserSettings {
   theme: Theme;
+  palette: Palette;
   textSize: TextSize;
   notifyMessages: boolean;
   notifyFriendRequests: boolean;
@@ -43,6 +47,8 @@ export interface UserSettings {
 
 interface SettingsRow {
   theme: Theme;
+  /** Only present once migration 20261115000014 has been applied. */
+  palette?: Palette;
   text_size: TextSize;
   notify_messages: boolean;
   notify_friend_requests: boolean;
@@ -60,6 +66,7 @@ interface SettingsRow {
 
 const DEFAULTS: UserSettings = {
   theme: "light",
+  palette: "soft-blue",
   textSize: "medium",
   notifyMessages: true,
   notifyFriendRequests: true,
@@ -81,9 +88,11 @@ const DEFAULTS: UserSettings = {
 
 const listeners = new Set<() => void>();
 
-function deviceAppearance(): Pick<UserSettings, "theme" | "textSize"> {
-  if (typeof window === "undefined") return { theme: "light", textSize: "medium" };
-  return { theme: getAppliedTheme(), textSize: getStoredTextSize() };
+function deviceAppearance(): Pick<UserSettings, "theme" | "palette" | "textSize"> {
+  if (typeof window === "undefined") {
+    return { theme: "light", palette: "soft-blue", textSize: "medium" };
+  }
+  return { theme: getAppliedTheme(), palette: getStoredPalette(), textSize: getStoredTextSize() };
 }
 
 let state: UserSettings = { ...DEFAULTS, ...deviceAppearance() };
@@ -177,11 +186,18 @@ async function handleUser(user: User | null): Promise<void> {
   const row = data as SettingsRow;
   commit(fromRow(row));
   applyTheme(row.theme);
+  applyPalette(row.palette ?? getStoredPalette());
   applyTextSize(row.text_size);
   // Presence: "Show online status" works only if last_seen_at stays fresh.
   void supabase
     .from("user_settings")
     .update({ last_seen_at: new Date().toISOString() })
+    .eq("user_id", user.id);
+  // Seed this device's palette into the row so the other devices converge on
+  // it. Harmless no-op while migration 20261115000014 hasn't been applied.
+  void supabase
+    .from("user_settings")
+    .update({ palette: getStoredPalette() })
     .eq("user_id", user.id);
 
   subscribeRealtime(supabase, user.id);
@@ -190,6 +206,8 @@ async function handleUser(user: User | null): Promise<void> {
 function fromRow(row: SettingsRow): UserSettings {
   return {
     theme: row.theme,
+    // Pre-migration rows have no palette column: keep this device's choice.
+    palette: row.palette ?? getStoredPalette(),
     textSize: row.text_size,
     notifyMessages: row.notify_messages,
     notifyFriendRequests: row.notify_friend_requests,
@@ -241,6 +259,7 @@ async function reload(): Promise<void> {
   const row = data as SettingsRow;
   commit(fromRow(row));
   applyTheme(row.theme);
+  applyPalette(row.palette ?? getStoredPalette());
   applyTextSize(row.text_size);
 }
 
@@ -249,6 +268,7 @@ async function reload(): Promise<void> {
 function toRowPatch(patch: Partial<UserSettings>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if (patch.theme !== undefined) row.theme = patch.theme;
+  if (patch.palette !== undefined) row.palette = patch.palette;
   if (patch.textSize !== undefined) row.text_size = patch.textSize;
   if (patch.notifyMessages !== undefined) row.notify_messages = patch.notifyMessages;
   if (patch.notifyFriendRequests !== undefined) row.notify_friend_requests = patch.notifyFriendRequests;
@@ -277,9 +297,17 @@ export function updateSettings(
   const previous = state;
   commit(patch);
   if (patch.theme !== undefined) applyTheme(patch.theme);
+  if (patch.palette !== undefined) applyPalette(patch.palette);
   if (patch.textSize !== undefined) applyTextSize(patch.textSize);
   if (!currentUserId) {
-    if (onError && (patch.theme === undefined && patch.textSize === undefined)) onError();
+    if (
+      onError &&
+      patch.theme === undefined &&
+      patch.palette === undefined &&
+      patch.textSize === undefined
+    ) {
+      onError();
+    }
     return;
   }
   const row = toRowPatch(patch);
@@ -293,6 +321,9 @@ export function updateSettings(
       console.warn("[settings] save failed", error.message);
       commit({ ...previous });
       if (previous.theme !== state.theme && patch.theme !== undefined) applyTheme(previous.theme);
+      if (previous.palette !== state.palette && patch.palette !== undefined) {
+        applyPalette(previous.palette);
+      }
       if (previous.textSize !== state.textSize && patch.textSize !== undefined) {
         applyTextSize(previous.textSize);
       }
