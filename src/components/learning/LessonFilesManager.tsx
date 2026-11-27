@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DownloadButton } from "@/components/ui/DownloadButton";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 
@@ -31,6 +33,7 @@ export function LessonFilesManager({ lessonId, canEdit, canDownload = true }: { 
   const toast = useToast();
   const [files, setFiles] = useState<LessonFile[] | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -54,8 +57,10 @@ export function LessonFilesManager({ lessonId, canEdit, canDownload = true }: { 
   }, [load]);
 
   async function upload(file: File) {
-    if (file.size > 50 * 1024 * 1024) {
-      toast.push(t("lessons.files.tooBig"));
+    // Spec Phase 4: shared policy (size + type + signature) on lesson files.
+    const check = await validateFile("courseAttachment", file);
+    if (!check.ok) {
+      setFileIssue(check.issue);
       return;
     }
     setUploading(true);
@@ -133,12 +138,20 @@ export function LessonFilesManager({ lessonId, canEdit, canDownload = true }: { 
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];
+              setFileIssue(null);
               if (file) void upload(file);
             }}
           />
           <Button type="button" variant="secondary" disabled={uploading} onClick={() => inputRef.current?.click()}>
             {uploading ? t("lessons.files.uploading") : t("lessons.files.upload")}
           </Button>
+          {fileIssue && (
+            <FileWarningCard
+              issue={fileIssue}
+              onChooseAnother={() => inputRef.current?.click()}
+              onDismiss={() => setFileIssue(null)}
+            />
+          )}
         </>
       )}
     </div>

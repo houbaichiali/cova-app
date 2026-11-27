@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { courseProgress } from "@/lib/progress";
 import { getSupabase } from "@/lib/supabase/client";
 import { useT } from "@/i18n/client";
@@ -53,19 +55,6 @@ const submissionColumns =
   "id, course_id, lesson_id, student_id, answer, status, grade, feedback, submitted_at, reviewed_at";
 const RESOURCE_BUCKET = "shared-resources";
 const ASSIGNMENT_ATTACHMENT_BUCKET = "assignment-attachments";
-const MAX_UPLOAD_SIZE = 20 * 1024 * 1024;
-const SUPPORTED_UPLOAD_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain",
-  "image/png",
-  "image/jpeg",
-]);
 
 function localDateTimeValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -108,6 +97,7 @@ export function CourseDetail({ course }: { course: Course }) {
   const [contentType, setContentType] = useState<"reading" | "video">("reading");
   const [savingContent, setSavingContent] = useState(false);
   const [contentFile, setContentFile] = useState<File | null>(null);
+  const [contentIssue, setContentIssue] = useState<FileIssue | null>(null);
   const [exerciseDueAt, setExerciseDueAt] = useState("");
   const [resourceRefreshKey, setResourceRefreshKey] = useState(0);
 
@@ -278,13 +268,14 @@ export function CourseDetail({ course }: { course: Course }) {
       return;
     }
 
-    if (contentFile && !SUPPORTED_UPLOAD_TYPES.has(contentFile.type)) {
-      toast.push("Choose a supported PDF, Office, text or image file.");
-      return;
-    }
-    if (contentFile && contentFile.size > MAX_UPLOAD_SIZE) {
-      toast.push("The attached file must be 20 MB or smaller.");
-      return;
+    if (contentFile) {
+      // Spec Phase 4: shared policy (size + extensions + declared MIME + real
+      // content signature) instead of trusting the declared type alone.
+      const check = await validateFile("courseAttachment", contentFile);
+      if (!check.ok) {
+        setContentIssue(check.issue);
+        return;
+      }
     }
     if (
       editorKind === "exercise" &&
@@ -954,10 +945,20 @@ export function CourseDetail({ course }: { course: Course }) {
                     id="content-document"
                     type="file"
                     accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg"
-                    onChange={(event) => setContentFile(event.target.files?.[0] ?? null)}
+                    onChange={(event) => {
+                      setContentIssue(null);
+                      setContentFile(event.target.files?.[0] ?? null);
+                    }}
                     disabled={savingContent}
                     className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5"
                   />
+                  {contentIssue && (
+                    <FileWarningCard
+                      issue={contentIssue}
+                      onChooseAnother={() => (document.getElementById("content-document") as HTMLInputElement | null)?.click()}
+                      onDismiss={() => setContentIssue(null)}
+                    />
+                  )}
                   <p className="mt-1 text-xs text-cova-mute">
                     PDF, Office, text or image · up to 20 MB
                     {editorKind === "lesson"

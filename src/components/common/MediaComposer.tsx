@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, FileUp, ImageIcon, Loader2, Mic, Square, Video, X } from "lucide-react";
 import { useT } from "@/i18n/client";
-import { MAX_MEDIA_BYTES, uploadMedia } from "@/lib/media-upload";
+import { uploadMedia } from "@/lib/media-upload";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import type { FileIssue } from "@/lib/file-policy";
 import { cn } from "@/lib/utils";
 import type { PostAttachment } from "@/types/social";
 
 /**
  * Media picker for post and message composers: image, camera, video, voice note
- * and any file. Files upload right away to the "space-media" bucket; the chosen
- * attachments are handed to the parent through onChange.
+ * and any file. Files pass the shared upload policy (size + type + signature)
+ * before upload; a rejected file opens the rich warning card with compress /
+ * convert actions instead of a bare error. Accepted files upload right away to
+ * the "space-media" bucket and are handed to the parent through onChange.
  */
 export function MediaComposer({
   spaceId,
@@ -25,6 +29,7 @@ export function MediaComposer({
   const [items, setItems] = useState<PostAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [issue, setIssue] = useState<FileIssue | null>(null);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
 
@@ -32,9 +37,15 @@ export function MediaComposer({
   const cameraRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const lastPickerRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+
+  const pick = (ref: React.RefObject<HTMLInputElement | null>) => {
+    lastPickerRef.current = ref.current;
+    ref.current?.click();
+  };
 
   const emit = useCallback(
     (next: PostAttachment[]) => {
@@ -57,23 +68,23 @@ export function MediaComposer({
       const file = files?.[0];
       if (!file) return;
       setError("");
-
-      if (file.size > MAX_MEDIA_BYTES) {
-        setError(t("media.tooLarge"));
-        return;
-      }
+      setIssue(null);
 
       setBusy(true);
       const result = await uploadMedia(spaceId, file);
       setBusy(false);
 
       if (!result.ok) {
-        setError(result.error);
+        if (result.issue) {
+          setIssue(result.issue);
+        } else {
+          setError(result.error);
+        }
         return;
       }
       emit([...items, result.value]);
     },
-    [emit, items, spaceId, t],
+    [emit, items, spaceId],
   );
 
   const startRecording = async () => {
@@ -152,7 +163,7 @@ export function MediaComposer({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => imageRef.current?.click()}
+          onClick={() => pick(imageRef)}
           aria-label={t("media.image")}
           title={t("media.image")}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-cova-mute transition-colors hover:bg-cova-pale hover:text-cova-ink disabled:opacity-40"
@@ -162,7 +173,7 @@ export function MediaComposer({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => cameraRef.current?.click()}
+          onClick={() => pick(cameraRef)}
           aria-label={t("media.camera")}
           title={t("media.camera")}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-cova-mute transition-colors hover:bg-cova-pale hover:text-cova-ink disabled:opacity-40"
@@ -172,7 +183,7 @@ export function MediaComposer({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => videoRef.current?.click()}
+          onClick={() => pick(videoRef)}
           aria-label={t("media.video")}
           title={t("media.video")}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-cova-mute transition-colors hover:bg-cova-pale hover:text-cova-ink disabled:opacity-40"
@@ -182,7 +193,7 @@ export function MediaComposer({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => fileRef.current?.click()}
+          onClick={() => pick(fileRef)}
           aria-label={t("media.file")}
           title={t("media.file")}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-cova-mute transition-colors hover:bg-cova-pale hover:text-cova-ink disabled:opacity-40"
@@ -245,6 +256,14 @@ export function MediaComposer({
         <p role="alert" className={cn("text-xs font-medium text-red-700")}>
           {error}
         </p>
+      )}
+
+      {issue && (
+        <FileWarningCard
+          issue={issue}
+          onChooseAnother={() => lastPickerRef.current?.click()}
+          onDismiss={() => setIssue(null)}
+        />
       )}
     </div>
   );

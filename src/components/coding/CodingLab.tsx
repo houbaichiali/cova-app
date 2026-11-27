@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { ArrowLeft, Code2, FilePlus2, FolderOpen, Medal, Play, RotateCcw, Save, Send, Terminal } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { Card, CardBody } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -107,6 +109,7 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
   const { t } = useI18n();
   const toast = useToast();
   const [languageId, setLanguageId] = useState<LanguageId | null>(null);
+  const [codeImportIssue, setCodeImportIssue] = useState<FileIssue | null>(null);
   const [jupyterOpen, setJupyterOpen] = useState(false);
   const [files, setFiles] = useState<Record<LanguageId, Record<string, string>>>(() =>
     Object.fromEntries(LANGUAGES.map((language) => [language.id, language.files])) as Record<LanguageId, Record<string, string>>,
@@ -242,9 +245,18 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
     const selected = Array.from(event.target.files ?? []);
     if (!selected.length) return;
     const imported: Record<string, string> = {};
-    for (const file of selected) imported[file.name] = await file.text();
+    for (const file of selected) {
+      // Spec Phase 4: code/text files only, 512 KB each, validated by policy.
+      const check = await validateFile("codingSubmission", file);
+      if (!check.ok) {
+        setCodeImportIssue(check.issue);
+        continue;
+      }
+      imported[file.name] = await file.text();
+    }
     setFiles((current) => ({ ...current, [languageId]: { ...current[languageId], ...imported } }));
-    setActiveFile(selected[0]!.name);
+    const firstName = Object.keys(imported)[0];
+    if (firstName) setActiveFile(firstName);
     event.target.value = "";
   }
 
@@ -561,6 +573,13 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
             </div>
             <div className="flex flex-wrap gap-2">
               <input type="file" multiple onChange={(event) => void importLocalFiles(event)} aria-label={t("coding.openFiles")} className="hidden" id="coding-open-files" />
+              {codeImportIssue && (
+                <FileWarningCard
+                  issue={codeImportIssue}
+                  onChooseAnother={() => document.getElementById("coding-open-files")?.click()}
+                  onDismiss={() => setCodeImportIssue(null)}
+                />
+              )}
               <Button size="sm" variant="secondary" onClick={() => document.getElementById("coding-open-files")?.click()}><FolderOpen className="h-4 w-4" aria-hidden="true" />{t("coding.openFiles")}</Button>
               <Button size="sm" variant="secondary" onClick={() => void saveProjectLocally()}><Save className="h-4 w-4" aria-hidden="true" />{t("coding.saveLocal")}</Button>
               <Button size="sm" onClick={() => void runCode()} disabled={running}><Play className="h-4 w-4" aria-hidden="true" />{running ? t("coding.running") : t("coding.run")}</Button>

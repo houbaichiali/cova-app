@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { TextAreaField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useI18n } from "@/i18n/client";
 import { challenges, type ChallengeContent, type ChallengeType } from "@/data/challenges";
 import { getSupabase } from "@/lib/supabase/client";
@@ -16,7 +18,6 @@ import { demoActions, useDemoState } from "@/lib/demo-store";
 import type { ChallengeKind, Difficulty } from "@/types";
 
 const FILE_BUCKET = "challenge-files";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
 type ChallengeView = { id: string; created_by?: string; title: string; description: string; kind: ChallengeKind; difficulty: Difficulty; points: number; minutes: number; exerciseType: ChallengeType; questions: ChallengeContent["questions"]; attachment_path?: string | null; attachment_name?: string | null; builtIn: boolean };
 type Submission = { id: string; user_id: string; status: "in_progress" | "submitted"; answers: Array<number | number[]>; response_text: string; storage_path: string | null; file_name: string | null; score: number | null; submitted_at: string | null; file_url?: string };
 
@@ -37,6 +38,7 @@ export function ChallengeDetailView({ challengeId }: { challengeId: string }) {
   const [answers, setAnswers] = useState<Array<number | number[]>>([]);
   const [response, setResponse] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setNotFound(false);
@@ -111,7 +113,14 @@ export function ChallengeDetailView({ challengeId }: { challengeId: string }) {
     event.preventDefault();
     if (!challenge || !submission || submission.status !== "in_progress" || !userId || submitting) { toast.push(t("challenges.detail.startFirst")); return; }
     if (challenge.questions.some((question, index) => question.choices && (Array.isArray(question.answer) ? !Array.isArray(answers[index]) || (answers[index] as number[]).some((value) => value < 1) : typeof answers[index] !== "number" || answers[index] < 0))) { toast.push(t("challenges.questionsRequired")); return; }
-    if (file && file.size > MAX_FILE_SIZE) { toast.push(t("challenges.fileTooLarge")); return; }
+    if (file) {
+      // Spec Phase 4: general-attachment policy on challenge responses.
+      const check = await validateFile("general", file);
+      if (!check.ok) {
+        setFileIssue(check.issue);
+        return;
+      }
+    }
     if (["written","coding","file"].includes(challenge.exerciseType) && !response.trim() && !file) { toast.push(t("challenges.detail.submitError")); return; }
     setSubmitting(true);
     let storagePath: string | null = null;
@@ -186,7 +195,7 @@ export function ChallengeDetailView({ challengeId }: { challengeId: string }) {
         })}</div> : question.choices ? <div className="space-y-2">{question.choices.map((choice, choiceIndex) => <label key={`${choiceIndex}-${choice}`} className="flex items-center gap-3 rounded-lg bg-cova-bg p-3 text-sm"><input type="radio" name={`answer-${questionIndex}`} checked={answers[questionIndex] === choiceIndex} onChange={() => setAnswers((current) => current.map((value, index) => index === questionIndex ? choiceIndex : value))} className="h-4 w-4 accent-cova-muted" />{choice}</label>)}</div> : null}
       </fieldset>)}
       {["written","coding","file"].includes(challenge.exerciseType) && <TextAreaField id="challenge-response" label={t("challenges.detail.response")} placeholder={t("challenges.detail.responsePlaceholder")} rows={6} value={response} onChange={(event) => setResponse(event.target.value)} disabled={!submission || submission.status === "submitted" || owner} />}
-      {(challenge.exerciseType === "file" || challenge.exerciseType === "coding" || challenge.exerciseType === "written") && !challenge.builtIn ? <div><label htmlFor="challenge-response-file" className="mb-1.5 block text-sm font-medium">{t("challenges.detail.fileResponse")}</label><input id="challenge-response-file" type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} disabled={!submission || submission.status === "submitted" || owner} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />{file && <p className="mt-1 text-xs text-cova-mute">{file.name}</p>}</div> : null}
+      {(challenge.exerciseType === "file" || challenge.exerciseType === "coding" || challenge.exerciseType === "written") && !challenge.builtIn ? <div><label htmlFor="challenge-response-file" className="mb-1.5 block text-sm font-medium">{t("challenges.detail.fileResponse")}</label><input id="challenge-response-file" type="file" onChange={(event) => { setFileIssue(null); setFile(event.target.files?.[0] ?? null); }} disabled={!submission || submission.status === "submitted" || owner} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />{file && <p className="mt-1 text-xs text-cova-mute">{file.name}</p>}{fileIssue && <FileWarningCard issue={fileIssue} onChooseAnother={() => (document.getElementById("challenge-response-file") as HTMLInputElement | null)?.click()} onDismiss={() => setFileIssue(null)} />}</div> : null}
       {!owner && submission?.status === "in_progress" && <form onSubmit={(event) => void submitChallenge(event)}><Button type="submit" disabled={submitting}><Send className="h-4 w-4" aria-hidden="true" />{submitting ? t("challenges.detail.submitting") : t("challenges.detail.submit")}</Button></form>}
       {!owner && submission?.status === "submitted" && <div className="rounded-lg bg-cova-pale p-3 text-sm">{submission.score === null ? t("challenges.detail.manualGrade") : challenge.builtIn ? t("challenges.detail.correct", { count: correctAnswers, total: keyedQuestions.length, score: submission.score, points: challenge.points }) : t("challenges.detail.score", { score: `${submission.score}/${challenge.points}` })}</div>}
     </CardBody></Card>
