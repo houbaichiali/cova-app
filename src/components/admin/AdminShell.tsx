@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, BarChart3, BookOpenCheck, LayoutDashboard, Menu, ScrollText, Settings, ShieldAlert, ShieldPlus, SlidersHorizontal, Trophy, UserCog, Users, X } from "lucide-react";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useAdminAccess } from "@/lib/admin-client";
 import { useI18n, useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
@@ -14,9 +15,12 @@ interface AdminNavItem {
   icon: typeof LayoutDashboard;
   /** Permission required to see the entry (dashboard itself: any admin). */
   permission?: string;
+  /** Contextual help shown as an accessible tooltip, never permanently. */
+  tooltipKey?: Parameters<ReturnType<typeof useT>>[0];
 }
 
-/** Modules light up as their phases land — no placeholder entries. */
+/** Modules light up as their phases land — no placeholder entries.
+ * Mirrors the actual routes under src/app/(admin)/admin/** 1:1. */
 const NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin", labelKey: "admin.nav.dashboard", icon: LayoutDashboard },
   { href: "/admin/users", labelKey: "admin.nav.users", icon: Users, permission: "users.read" },
@@ -24,10 +28,17 @@ const NAV_ITEMS: AdminNavItem[] = [
   { href: "/admin/rules", labelKey: "admin.nav.rules", icon: ScrollText, permission: "rules.read" },
   { href: "/admin/content", labelKey: "admin.nav.content", icon: BookOpenCheck, permission: "content.review" },
   { href: "/admin/gamification", labelKey: "admin.nav.gamification", icon: Trophy, permission: "gamification.badges.manage" },
-  { href: "/admin/reward-rules", labelKey: "admin.nav.rewardRules", icon: SlidersHorizontal, permission: "gamification.rules.manage" },
+  {
+    href: "/admin/reward-rules",
+    labelKey: "admin.nav.rewardRules",
+    icon: SlidersHorizontal,
+    permission: "gamification.rules.manage",
+    tooltipKey: "admin.tooltip.rewardRules",
+  },
   { href: "/admin/analytics", labelKey: "admin.nav.analytics", icon: BarChart3, permission: "analytics.read" },
   { href: "/admin/security", labelKey: "admin.nav.security", icon: ShieldPlus, permission: "security.read" },
   { href: "/admin/settings", labelKey: "admin.nav.settings", icon: Settings, permission: "settings.manage" },
+  { href: "/admin/requirements", labelKey: "admin.nav.requirements", icon: BookOpenCheck, permission: "requirements.read" },
   { href: "/admin/team", labelKey: "admin.nav.team", icon: UserCog, permission: "team.manage" },
 ];
 
@@ -81,11 +92,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {NAV_ITEMS.map(({ href, labelKey, icon: Icon, permission }) => {
+        {/* Scrollbars hidden (cova-scroll-hide) while scrolling stays fully
+            available: mouse wheel, touchpad, keyboard and touch. No entry is
+            clipped — the container keeps its full scrollable height. */}
+        <nav className="cova-scroll-hide min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
+          {NAV_ITEMS.map(({ href, labelKey, icon: Icon, permission, tooltipKey }) => {
             if (permission && !access.can(permission)) return null;
             const active = pathname === href || pathname.startsWith(`${href}/`);
-            return (
+            const link = (
               <Link
                 key={href}
                 href={href}
@@ -93,12 +107,21 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  active ? "bg-white/15 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white",
+                  active
+                    ? "bg-admin-active text-white"
+                    : "text-slate-300 hover:bg-admin-hover hover:text-white",
                 )}
               >
-                <Icon className="h-4.5 w-4.5" aria-hidden="true" />
-                {t(labelKey)}
+                <Icon className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 truncate">{t(labelKey)}</span>
               </Link>
+            );
+            return tooltipKey ? (
+              <Tooltip key={href} label={t(tooltipKey)}>
+                {link}
+              </Tooltip>
+            ) : (
+              link
             );
           })}
         </nav>
