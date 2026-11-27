@@ -583,7 +583,7 @@ export function GroupDetail({ code, joinParam = "" }: { code: string; joinParam?
                 <div className="flex gap-2">
                   <input
                     value={text}
-                    maxLength={5000}
+                    maxLength={2000}
                     onChange={(event) => setText(event.target.value)}
                     placeholder={t("groupDetail.writeMessage")}
                     aria-label={t("groupDetail.writeMessage")}

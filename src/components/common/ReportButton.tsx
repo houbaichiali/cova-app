@@ -105,6 +105,7 @@ export function ReportButton({
             id="report-details"
             label={t("report.details")}
             value={description}
+            maxLength={1000}
             onChange={(e) => setDescription(e.target.value)}
           />
           <div className="flex justify-end gap-2 pt-1">
