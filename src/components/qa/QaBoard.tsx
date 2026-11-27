@@ -140,12 +140,14 @@ export function QaBoard() {
                     id="qa-title"
                     label={t("qa.questionTitle")}
                     value={title}
+                    maxLength={100}
                     onChange={(e) => setTitle(e.target.value)}
                   />
                   <TextAreaField
                     id="qa-body"
                     label={t("qa.details")}
                     value={body}
+                    maxLength={3000}
                     onChange={(e) => setBody(e.target.value)}
                   />
                   <label className="block space-y-1">

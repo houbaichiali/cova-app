@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { fail, ok } from "@/lib/result";
 
+import { validateFile } from "@/lib/file-policy";
+
 import type { ActionResult } from "@/types/social";
 
 import { getSupabase } from "@/lib/supabase/client";
@@ -431,8 +433,8 @@ export const DEFAULT_PORTFOLIO_SETTINGS: PortfolioSettings = {
 
 const COVER_BUCKET = "profile-covers";
 const DOC_BUCKET = "portfolio-documents";
-const IMAGE_MAX_BYTES = 4 * 1024 * 1024;
-const DOC_MAX_BYTES = 10 * 1024 * 1024;
+// Cover/document size limits moved to the shared file policy (1,024 KB and
+// the document policy) — src/lib/file-policy.ts.
 
 export function useMyPortfolio() {
   const [settings, setSettings] = useState<PortfolioSettings | null>(null);
@@ -536,10 +538,16 @@ export function useMyPortfolio() {
       const supabase = getSupabase();
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) return fail("Sign in first.");
-      if (file.size > IMAGE_MAX_BYTES) return fail("Images must be 4 MB or smaller.");
-      if (!/^image\/(png|jpeg|webp)$/.test(file.type))
-        return fail("Images must be PNG, JPG or WebP.");
-      const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+      // Spec Phase 4: cover images are 1,024 KB max, JPG/JPEG/PNG/WEBP only,
+      // verified down to the content signature.
+      const check = await validateFile("cover", file);
+      if (!check.ok) {
+        return fail(
+          `Unsupported image: ${check.issue.fileName} (${check.issue.actualKB} KB; max ${check.issue.maxKB} KB; accepts ${check.issue.expected}).`,
+          check.issue,
+        );
+      }
+      const ext = check.extension === "png" ? "png" : check.extension === "webp" ? "webp" : "jpg";
       const path = `${auth.user.id}/cover-${Date.now()}.${ext}`;
       const { error } = await supabase.storage.from(bucket).upload(path, file, {
         contentType: file.type,
@@ -555,10 +563,16 @@ export function useMyPortfolio() {
     const supabase = getSupabase();
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) return fail("Sign in first.");
-    if (file.size > DOC_MAX_BYTES) return fail("Documents must be 10 MB or smaller.");
-    if (!/^(application\/pdf|image\/(png|jpeg|webp))$/.test(file.type))
-      return fail("Documents must be a PDF or an image (PNG, JPG, WebP).");
-    const ext = file.type === "application/pdf" ? "pdf" : file.type.split("/")[1];
+    // Spec Phase 4: portfolio documents keep the PDF/PNG/JPG/WEBP policy with
+    // signature verification before the private upload.
+    const check = await validateFile("document", file);
+    if (!check.ok) {
+      return fail(
+        `Unsupported document: ${check.issue.fileName} (${check.issue.actualKB} KB; max ${check.issue.maxKB} KB; accepts ${check.issue.expected}).`,
+        check.issue,
+      );
+    }
+    const ext = check.extension;
     const path = `${auth.user.id}/doc-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from(DOC_BUCKET).upload(path, file, {
       contentType: file.type,

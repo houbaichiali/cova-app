@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Link2, UserRound } from "lucide-react";
 
 import { ProfilePageView, type ProfileRenderModel } from "@/components/profile/ProfilePageView";
+import { ProfilePublicDetails } from "@/components/profile/ProfileDetailsEditor";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useT } from "@/i18n/client";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -147,6 +148,9 @@ export function PublicProfile({ code, notFoundLabel }: { code: string; notFoundL
           {copied ? t("profile.linkCopied") : t("profile.copyLink")}
         </button>
       </div>
+      {/* Extended details + social links, pre-filtered server-side per-field
+          audience (spec Phase 7) — renders nothing when nothing is public. */}
+      <ProfilePublicDetails code={code} />
       <ProfilePageView model={model} />
     </div>
   );

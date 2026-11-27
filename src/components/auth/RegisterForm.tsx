@@ -6,6 +6,8 @@ import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/FormField";
+import { PasswordRequirements } from "@/components/auth/PasswordRequirements";
+import { SocialAuthButtons } from "@/components/auth/SocialAuthButtons";
 import { useT } from "@/i18n/client";
 import { authActions } from "@/lib/auth";
 import {
@@ -62,10 +64,8 @@ export function RegisterForm() {
       }
 
       if (result.value.needsEmailConfirmation) {
-        window.alert(
-          "Ton compte a été créé. Vérifie ta boîte mail pour confirmer ton adresse, puis connecte-toi.",
-        );
-        router.push("/login");
+        // Verification hub (spec 5.1/5.3) instead of a bare browser alert.
+        router.push(`/verify-email?email=${encodeURIComponent(values.email.trim())}`);
         return;
       }
 
@@ -93,6 +93,7 @@ export function RegisterForm() {
         id="name"
         label={t("auth.field.name")}
         autoComplete="name"
+        maxLength={60}
         value={values.name}
         error={errors.name ? t(errors.name) : undefined}
         onChange={(e) => set("name", e.target.value)}
@@ -104,27 +105,34 @@ export function RegisterForm() {
         type="email"
         autoComplete="email"
         placeholder="name@school.edu"
+        maxLength={254}
         value={values.email}
         error={errors.email ? t(errors.email) : undefined}
         onChange={(e) => set("email", e.target.value)}
       />
 
-      <TextField
-        id="password"
-        label={t("auth.field.password")}
-        type="password"
-        autoComplete="new-password"
-        hint={t("auth.field.passwordHint")}
-        value={values.password}
-        error={errors.password ? t(errors.password) : undefined}
-        onChange={(e) => set("password", e.target.value)}
-      />
+      <div>
+        <TextField
+          id="password"
+          label={t("auth.field.password")}
+          type="password"
+          autoComplete="new-password"
+          maxLength={50}
+          value={values.password}
+          error={errors.password ? t(errors.password) : undefined}
+          onChange={(e) => set("password", e.target.value)}
+        />
+        {/* Spec 3.4: every requirement visible above the field, updating
+            independently; submission stays blocked until all pass. */}
+        <PasswordRequirements value={values.password} />
+      </div>
 
       <TextField
         id="confirm"
         label={t("auth.field.confirm")}
         type="password"
         autoComplete="new-password"
+        maxLength={50}
         value={values.confirm}
         error={errors.confirm ? t(errors.confirm) : undefined}
         onChange={(e) => set("confirm", e.target.value)}
@@ -160,6 +168,8 @@ export function RegisterForm() {
           ? t("auth.register.submitting")
           : t("common.createAccount")}
       </Button>
+
+      <SocialAuthButtons />
 
       <p className="text-center text-sm text-cova-mute">
         {t("auth.register.haveAccount")}{" "}

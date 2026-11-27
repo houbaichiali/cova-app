@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Crown, Lock, Medal, Trophy } from "lucide-react";
+import { Crown, Medal } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { SearchInput } from "@/components/ui/SearchInput";
 import { Tabs } from "@/components/ui/Tabs";
 import { XpAnalytics } from "@/components/learning/XpAnalytics";
 import { useI18n } from "@/i18n/client";
@@ -17,63 +15,24 @@ import { useS } from "@/i18n/spaces";
 import { friendsOf, useSocial } from "@/lib/social-store";
 import { periodEnd, periodStart, type XpEntry, type XpPeriodKind } from "@/lib/xp-analytics";
 import {
-  buildBadgeList,
-  CATEGORIES,
+  buildAchievements,
+  isVisibleAchievement,
+  type Achievement,
+} from "@/lib/badge-collection";
+import { rankName, rankStyle } from "@/lib/badge-ranks";
+import { BadgeShowcase } from "@/components/badges/BadgeShowcase";
+import {
   fetchFriendsLeaderboard,
   levelForXp,
-  RARITIES,
   useGamification,
-  type BadgeWithState,
-  type Rarity,
+  type MyBadge,
+  type RankAwardRow,
 } from "@/lib/gamification";
 import { cn } from "@/lib/utils";
 
-const RARITY_STYLE: Record<Rarity, string> = {
-  common: "bg-gradient-to-br from-amber-200 to-amber-500 text-amber-950",
-  uncommon: "bg-gradient-to-br from-slate-200 to-slate-400 text-slate-900",
-  rare: "bg-gradient-to-br from-yellow-200 to-yellow-500 text-yellow-950",
-  epic: "bg-gradient-to-br from-indigo-200 to-indigo-500 text-indigo-950",
-  legendary: "bg-gradient-to-br from-neutral-800 via-yellow-600 to-neutral-800 text-yellow-100",
-};
-
-function rarityKey(rarity: Rarity) {
-  return `gm.rarity.${rarity}` as const;
-}
-
-function BadgeChip({ state, compact }: { state: BadgeWithState; compact?: boolean }) {
-  const t = useS();
-  const { definition, awarded, metricValue } = state;
-  const locked = !awarded;
-  return (
-    <div
-      className={cn(
-        "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center",
-        locked ? "border-cova-line bg-cova-bg opacity-70 grayscale" : "border-cova-line bg-white",
-      )}
-    >
-      <span
-        className={cn(
-          "flex h-12 w-12 items-center justify-center rounded-full text-lg shadow-inner",
-          locked ? "bg-cova-pale text-cova-mute" : RARITY_STYLE[definition.rarity],
-        )}
-        aria-hidden="true"
-      >
-        {locked ? <Lock className="h-5 w-5" /> : <Trophy className="h-5 w-5" />}
-      </span>
-      <span className="line-clamp-1 text-xs font-semibold">{definition.name}</span>
-      {awarded?.recipient_number && <span className="text-[10px] text-cova-mute">#{awarded.recipient_number}</span>}
-      {!compact && (
-        <span className="text-[10px] font-medium uppercase tracking-wide text-cova-muted">{t(rarityKey(definition.rarity))}</span>
-      )}
-      {!awarded && metricValue !== null && (
-        <div className="w-full">
-          <ProgressBar value={Math.min(metricValue, definition.threshold)} max={definition.threshold} label={definition.name} className="h-1.5" />
-          <span className="mt-0.5 block text-[10px] text-cova-mute">{Math.min(metricValue, definition.threshold)} / {definition.threshold}</span>
-        </div>
-      )}
-      <span className="text-[10px] text-cova-mute">+{definition.xp_reward} XP</span>
-    </div>
-  );
+interface FriendRankCompare {
+  name: string;
+  top: { key: string; name: string; rank: number }[];
 }
 
 export function LeaderboardPageContent() {
@@ -81,15 +40,17 @@ export function LeaderboardPageContent() {
   const { formatTag } = useI18n();
   const social = useSocial();
   const meId = social.meId ?? "";
-  const [tab, setTab] = useState<"xp" | "badges">("xp");
+  // Deep link: /leaderboard?tab=badges opens the Badge Achievements tab.
+  const [tab, setTab] = useState<"xp" | "badges">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "badges"
+      ? "badges"
+      : "xp",
+  );
   const [rows, setRows] = useState<Awaited<ReturnType<typeof fetchFriendsLeaderboard>>>([]);
   const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState<string>("all");
-  const [rarity, setRarity] = useState<string>("all");
-  const [stateFilter, setStateFilter] = useState<"all" | "unlocked" | "locked" | "progress">("all");
-  const [query, setQuery] = useState("");
   const [compareFriend, setCompareFriend] = useState<string>("");
   const [comparison, setComparison] = useState<Record<string, unknown> | null>(null);
+  const [friendRanks, setFriendRanks] = useState<FriendRankCompare | null>(null);
 
   // Period selection shared by the chart and both rankings.
   const [periodKind, setPeriodKind] = useState<XpPeriodKind>("week");
@@ -100,7 +61,7 @@ export function LeaderboardPageContent() {
   const [sumsError, setSumsError] = useState(false);
   const [globalRank, setGlobalRank] = useState<number | null>(null);
 
-  const { definitions, myBadges, metrics, ledger, xp, togglePin } = useGamification();
+  const { definitions, myBadges, rankAwards, metrics, ledger, xp, togglePinFamily } = useGamification();
   const friends = useMemo(() => (meId ? friendsOf(social, meId) : []), [social, meId]);
   const friendCodes = useMemo(() => friends.map((friend) => friend.id), [friends]);
 
@@ -195,21 +156,29 @@ export function LeaderboardPageContent() {
   const chartLoading = !!meId && ledgerFull === null;
   const effectiveRank = meId && xp !== null ? globalRank : null;
 
-  const badgeList = useMemo(
-    () => (definitions && myBadges && metrics ? buildBadgeList(definitions, myBadges, metrics) : []),
-    [definitions, myBadges, metrics],
+  // One achievement = one card: the shared aggregation collapses edition
+  // families and rank ladders (see src/lib/badge-collection.ts).
+  const achievements = useMemo(
+    () =>
+      definitions && myBadges && rankAwards && metrics
+        ? buildAchievements(definitions, myBadges, rankAwards, metrics)
+        : null,
+    [definitions, myBadges, rankAwards, metrics],
   );
+  const myAchievementByKey = useMemo(() => {
+    const map = new Map<string, Achievement>();
+    for (const item of achievements ?? []) map.set(item.key, item);
+    return map;
+  }, [achievements]);
   const myLevel = useMemo(() => levelForXp(xp ?? 0), [xp]);
 
-  const visibleBadges = badgeList.filter((state) => {
-    const { definition, awarded, metricValue } = state;
-    if (category !== "all" && definition.category !== category) return false;
-    if (rarity !== "all" && definition.rarity !== rarity) return false;
-    if (stateFilter === "unlocked" && !awarded) return false;
-    if (stateFilter === "locked" && awarded) return false;
-    if (stateFilter === "progress" && (awarded || metricValue === null || metricValue <= 0)) return false;
-    return !query.trim() || definition.name.toLowerCase().includes(query.trim().toLowerCase());
-  });
+  async function handleTogglePin(achievement: Achievement) {
+    try {
+      await togglePinFamily(achievement.familyKeys, achievement.pinKey, !achievement.pinned);
+    } catch {
+      // The server policy is authoritative; a failed pin leaves the state as-is.
+    }
+  }
 
   const meRow = rows.find((row) => row.isMe);
   const totalFriends = rows.length - (meRow ? 1 : 0);
@@ -236,6 +205,7 @@ export function LeaderboardPageContent() {
 
   async function loadComparison(friendCode: string) {
     setCompareFriend(friendCode);
+    setFriendRanks(null);
     if (!friendCode) {
       setComparison(null);
       return;
@@ -246,6 +216,42 @@ export function LeaderboardPageContent() {
       setComparison((data ?? null) as Record<string, unknown> | null);
     } catch {
       setComparison(null);
+    }
+    // Rank-level comparison: badge_rank_awards is public to authenticated
+    // members; edition rows follow RLS (own + pinned), so only visible data
+    // is compared — never guessed.
+    try {
+      const { data: profile } = await getSupabase()
+        .from("profiles")
+        .select("id,display_name")
+        .eq("user_code", friendCode)
+        .maybeSingle();
+      if (!profile?.id || !definitions) return;
+      const [badgesRes, ranksRes] = await Promise.all([
+        getSupabase()
+          .from("user_badges")
+          .select("badge_key,recipient_number,pinned,awarded_at")
+          .eq("user_id", (profile as { id: string }).id),
+        getSupabase()
+          .from("badge_rank_awards")
+          .select("badge_key,rank,awarded_at")
+          .eq("user_id", (profile as { id: string }).id),
+      ]);
+      const theirs = buildAchievements(
+        definitions,
+        (badgesRes.data ?? []) as MyBadge[],
+        (ranksRes.data ?? []) as unknown as RankAwardRow[],
+        null,
+      ).filter((item) => isVisibleAchievement(item, false) && item.currentRank !== null);
+      setFriendRanks({
+        name: (profile as { display_name: string | null }).display_name ?? friendCode,
+        top: theirs
+          .sort((a, b) => (b.currentRank ?? 0) - (a.currentRank ?? 0))
+          .slice(0, 12)
+          .map((item) => ({ key: item.key, name: item.name, rank: item.currentRank ?? 0 })),
+      });
+    } catch {
+      setFriendRanks(null);
     }
   }
 
@@ -414,63 +420,22 @@ export function LeaderboardPageContent() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label={t("gm.filter.category")} className="h-9 rounded-lg border border-cova-line bg-white px-2 text-sm">
-              <option value="all">{t("gm.filter.allCategories")}</option>
-              {CATEGORIES.map((item) => <option key={item} value={item}>{t(`gm.category.${item}` as never)}</option>)}
-            </select>
-            <select value={rarity} onChange={(event) => setRarity(event.target.value)} aria-label={t("gm.filter.rarity")} className="h-9 rounded-lg border border-cova-line bg-white px-2 text-sm">
-              <option value="all">{t("gm.filter.allRarities")}</option>
-              {RARITIES.map((item) => <option key={item} value={item}>{t(rarityKey(item))}</option>)}
-            </select>
-            <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value as typeof stateFilter)} aria-label={t("gm.filter.state")} className="h-9 rounded-lg border border-cova-line bg-white px-2 text-sm">
-              <option value="all">{t("gm.filter.allStates")}</option>
-              <option value="unlocked">{t("gm.filter.unlocked")}</option>
-              <option value="locked">{t("gm.filter.locked")}</option>
-              <option value="progress">{t("gm.filter.progress")}</option>
-            </select>
-            <div className="min-w-40 flex-1">
-              <SearchInput label={t("gm.search")} placeholder={t("gm.search")} value={query} onChange={setQuery} />
-            </div>
-          </div>
-
-          {meId && (
-            <Card>
-              <CardBody className="flex flex-wrap items-center gap-4">
-                <div className="min-w-48 flex-1">
-                  <p className="text-sm font-semibold">{t("gm.yourLevel", { name: myLevel.name, level: myLevel.level })}</p>
-                  <ProgressBar value={myLevel.needed > 0 ? myLevel.into : 1} max={myLevel.needed > 0 ? myLevel.needed : 1} label={t("gm.yourLevel", { name: myLevel.name, level: myLevel.level })} className="mt-1.5" />
-                  <p className="mt-1 text-xs text-cova-mute">{xp?.toLocaleString(formatTag)} XP{myLevel.needed > 0 && ` · ${t("gm.xpToNext", { into: myLevel.into, needed: myLevel.needed })}`}</p>
-                </div>
-                <div className="text-end">
-                  <p className="text-sm text-cova-mute">{t("gm.badgesUnlocked")}</p>
-                  <p className="text-xl font-semibold">{myBadges?.length ?? 0} <span className="text-sm text-cova-mute">/ {definitions?.length ?? 0}</span></p>
-                </div>
-              </CardBody>
-            </Card>
-          )}
-
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-            {visibleBadges.map((state) => {
-              const awarded = state.awarded;
-              const isPinned = awarded?.pinned ?? false;
-              return (
-                <div key={state.definition.key} className="space-y-1">
-                  <BadgeChip state={state} />
-                  {awarded && (
-                    <Button
-                      size="sm"
-                      variant={isPinned ? "primary" : "ghost"}
-                      className="w-full"
-                      onClick={() => void togglePin(state.definition.key, !isPinned)}
-                    >
-                      {isPinned ? t("gm.unpin") : t("gm.pin")}
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <BadgeShowcase
+            achievements={achievements}
+            isOwner={!!meId}
+            onTogglePin={meId ? handleTogglePin : undefined}
+            xpHeader={
+              meId && xp !== null
+                ? {
+                    levelName: myLevel.name,
+                    level: myLevel.level,
+                    into: myLevel.into,
+                    needed: myLevel.needed,
+                    xp,
+                  }
+                : null
+            }
+          />
 
           {meId && friends.length > 0 && (
             <Card>
@@ -496,6 +461,38 @@ export function LeaderboardPageContent() {
                       {compareRow("gm.compare.epic", (comparison.me as Record<string, unknown>).epic, (comparison.friend as Record<string, unknown>).epic)}
                       {compareRow("gm.compare.legendary", (comparison.me as Record<string, unknown>).legendary, (comparison.friend as Record<string, unknown>).legendary)}
                       {compareRow("gm.compare.shared", comparison.shared, comparison.shared)}
+                    </ul>
+                  </div>
+                )}
+                {friendRanks && friendRanks.top.length > 0 && (
+                  <div className="pt-2">
+                    <h3 className="mb-2 text-sm font-semibold">{t("gm.compare.ranks")}</h3>
+                    <ul className="space-y-1.5">
+                      {friendRanks.top.map((row) => {
+                        const mine = myAchievementByKey.get(row.key);
+                        return (
+                          <li
+                            key={row.key}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-cova-line px-3 py-2 text-sm"
+                          >
+                            <span className="min-w-0 truncate font-medium text-cova-ink">{row.name}</span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              {mine?.currentRank ? (
+                                <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold", rankStyle(mine.currentRank).chip)}>
+                                  {t("gm.compare.you")}: {rankName(mine.currentRank)}
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-cova-pale px-2 py-0.5 text-xs text-cova-mute">
+                                  {t("gm.compare.you")}: —
+                                </span>
+                              )}
+                              <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold", rankStyle(row.rank).chip)}>
+                                {friendRanks.name}: {rankName(row.rank)}
+                              </span>
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}

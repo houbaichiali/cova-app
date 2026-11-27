@@ -10,10 +10,12 @@ interface ModalProps {
   title: string;
   description?: string;
   children: ReactNode;
+  /** "md" (default, max-w-lg) or "lg" (max-w-2xl, rich content like the badge progression). */
+  size?: "md" | "lg";
 }
 
 /** Accessible modal built on the native <dialog> element (focus trap, Escape to close). */
-export function Modal({ open, onClose, title, description, children }: ModalProps) {
+export function Modal({ open, onClose, title, description, children, size = "md" }: ModalProps) {
   const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -32,7 +34,9 @@ export function Modal({ open, onClose, title, description, children }: ModalProp
         if (e.target === ref.current) onClose();
       }}
       aria-labelledby="modal-title"
-      className="m-auto w-[calc(100%-2rem)] max-w-lg rounded-xl border border-cova-line bg-white p-0 text-cova-ink"
+      className={`m-auto w-[calc(100%-2rem)] rounded-xl border border-cova-line bg-white p-0 text-cova-ink ${
+        size === "lg" ? "max-w-2xl" : "max-w-lg"
+      }`}
     >
       {open && (
         <div className="p-6">

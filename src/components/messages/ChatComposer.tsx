@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Mic, Paperclip, Send, Square, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
-import { MAX_MEDIA_BYTES, uploadMedia } from "@/lib/media-upload";
+import { uploadMedia } from "@/lib/media-upload";
+import type { FileIssue } from "@/lib/file-policy";
 import { getSupabase } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { PostAttachment } from "@/types/social";
@@ -47,6 +49,7 @@ export function ChatComposer({
 
   const [draft, setDraft] = useState("");
   const [queue, setQueue] = useState<PostAttachment[]>([]);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -79,10 +82,6 @@ export function ChatComposer({
   async function addFiles(files: File[]) {
     if (files.length === 0) return;
     for (const file of files) {
-      if (file.size > MAX_MEDIA_BYTES) {
-        toast.push(t("dm.fileTooLarge"));
-        continue;
-      }
       setUploading(true);
       try {
         // dm-media policy requires uploads to live in the sender's own folder.
@@ -90,6 +89,9 @@ export function ChatComposer({
         const result = await uploadMedia(senderId, file, "dm-media");
         if (result.ok) {
           setQueue((q) => [...q, result.value]);
+        } else if (result.issue) {
+          // Rich warning card (spec 4.4–4.6) instead of a bare toast.
+          setFileIssue(result.issue);
         } else {
           toast.push(result.error);
         }
@@ -203,6 +205,14 @@ export function ChatComposer({
             </li>
           ))}
         </ul>
+      )}
+
+      {fileIssue && (
+        <FileWarningCard
+          issue={fileIssue}
+          onChooseAnother={() => fileInputRef.current?.click()}
+          onDismiss={() => setFileIssue(null)}
+        />
       )}
 
       {recording ? (

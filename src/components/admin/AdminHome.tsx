@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, BookOpenCheck, ScrollText, Settings, ShieldAlert, ShieldCheck, ShieldPlus, Trophy, UserCog, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, BookOpenCheck, ScrollText, Settings, ShieldAlert, ShieldCheck, ShieldPlus, SlidersHorizontal, Trophy, UserCog, Users, type LucideIcon } from "lucide-react";
 import { AdminStats } from "@/components/admin/AdminStats";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
@@ -24,9 +24,11 @@ const MODULE_LINKS: ModuleLink[] = [
   { href: "/admin/rules", labelKey: "admin.nav.rules", icon: ScrollText, permission: "rules.read" },
   { href: "/admin/content", labelKey: "admin.nav.content", icon: BookOpenCheck, permission: "content.review" },
   { href: "/admin/gamification", labelKey: "admin.nav.gamification", icon: Trophy, permission: "gamification.badges.manage" },
+  { href: "/admin/reward-rules", labelKey: "admin.nav.rewardRules", icon: SlidersHorizontal, permission: "gamification.rules.manage" },
   { href: "/admin/analytics", labelKey: "admin.nav.analytics", icon: BarChart3, permission: "analytics.read" },
   { href: "/admin/security", labelKey: "admin.nav.security", icon: ShieldPlus, permission: "security.read" },
   { href: "/admin/settings", labelKey: "admin.nav.settings", icon: Settings, permission: "settings.manage" },
+  { href: "/admin/requirements", labelKey: "admin.nav.requirements", icon: BookOpenCheck, permission: "requirements.read" },
   { href: "/admin/team", labelKey: "admin.nav.team", icon: UserCog, permission: "team.manage" },
 ];
 

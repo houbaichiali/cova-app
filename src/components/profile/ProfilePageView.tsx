@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Award,
   BookOpen,
@@ -24,6 +24,8 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs } from "@/components/ui/Tabs";
 import { useT } from "@/i18n/client";
 import { levelForXp } from "@/lib/level-curve";
+import { getSupabase } from "@/lib/supabase/client";
+import type { BadgeDefinition } from "@/lib/gamification";
 import {
   ALIGN_CLASS,
   COVER_PRESET_CLASS,
@@ -95,6 +97,28 @@ export function ProfilePageView({ model }: { model: ProfileRenderModel }) {
   const { identity, appearance, visible, isOwner, data } = model;
   const level = levelForXp(identity.xp ?? 0);
   const [journeyFilter, setJourneyFilter] = useState<JourneyFilter>("all");
+
+  // Badge definitions enable the collapsed, rank-colored marquee chips and the
+  // rich eight-rank detail view. Anonymous visitors fall back to plain chips.
+  const [badgeDefs, setBadgeDefs] = useState<BadgeDefinition[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data: rows } = await getSupabase()
+          .from("badge_definitions")
+          .select("*")
+          .eq("enabled", true)
+          .order("sort_order");
+        if (!cancelled) setBadgeDefs((rows ?? []) as BadgeDefinition[]);
+      } catch {
+        if (!cancelled) setBadgeDefs([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const coverClass =
     appearance.cover_kind === "color" && appearance.cover_color
@@ -229,6 +253,8 @@ export function ProfilePageView({ model }: { model: ProfileRenderModel }) {
         ) : (
           <BadgeMarquee
             badges={data.badges ?? []}
+            definitions={badgeDefs}
+            ownerCode={identity.user_code}
             className={marqueeBackground(appearance)}
             style={{
               backgroundColor:

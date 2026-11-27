@@ -6,18 +6,11 @@ import type { ChallengeType } from "@/data/challenges";
 
 /* ------------------------------------------------------------------ model */
 
-export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
-export const RARITIES: Rarity[] = ["common", "uncommon", "rare", "epic", "legendary"];
-export const CATEGORIES = [
-  "getting-started",
-  "learning",
-  "consistency",
-  "excellence",
-  "challenges",
-  "community",
-  "coding",
-  "special",
-] as const;
+// Rank names/colors, rarity identity and the category list have ONE source of
+// truth in badge-ranks.ts; existing import sites keep working via re-exports.
+import type { Rarity } from "@/lib/badge-ranks";
+export { CATEGORIES, RARITIES } from "@/lib/badge-ranks";
+export type { Rarity } from "@/lib/badge-ranks";
 
 export interface BadgeDefinition {
   key: string;
@@ -31,12 +24,26 @@ export interface BadgeDefinition {
   xp_reward: number;
   secret: boolean;
   limited: boolean;
+  sort_order?: number;
+  /** Additive columns of the rank overhaul (20261115000009). */
+  image_url?: string | null;
+  visibility_mode?: "public" | "private" | "hidden";
+  /** 8-rank ladder [{rank:1..8, threshold}] when configured server-side. */
+  ranks?: { rank: number; threshold: number }[] | null;
 }
 
 export interface MyBadge {
   badge_key: string;
   recipient_number: number | null;
   pinned: boolean;
+  awarded_at: string;
+}
+
+/** Row of the my_badge_ranks() RPC (badge_rank_awards for the signed-in user). */
+export interface RankAwardRow {
+  badge_key: string;
+  rank: number;
+  label: string;
   awarded_at: string;
 }
 
@@ -59,6 +66,7 @@ export { levelForXp, levelThreshold, levelStep, levelName } from "@/lib/level-cu
 export function useGamification() {
   const [definitions, setDefinitions] = useState<BadgeDefinition[] | null>(null);
   const [myBadges, setMyBadges] = useState<MyBadge[] | null>(null);
+  const [rankAwards, setRankAwards] = useState<RankAwardRow[] | null>(null);
   const [metrics, setMetrics] = useState<Record<string, number> | null>(null);
   const [ledger, setLedger] = useState<LedgerEntry[] | null>(null);
   const [xp, setXp] = useState<number | null>(null);
@@ -66,15 +74,18 @@ export function useGamification() {
   const load = useCallback(async () => {
     try {
       const supabase = getSupabase();
-      const [defsResult, badgesResult, metricsResult, ledgerResult, profileResult] = await Promise.all([
-        supabase.from("badge_definitions").select("*").eq("enabled", true).order("sort_order"),
-        supabase.from("user_badges").select("badge_key,recipient_number,pinned,awarded_at"),
-        supabase.rpc("my_badge_metrics"),
-        supabase.from("xp_ledger").select("event_key,amount,reason,created_at").order("created_at", { ascending: false }).limit(50),
-        supabase.from("profiles").select("xp").eq("id", (await supabase.auth.getUser()).data.user?.id ?? "").maybeSingle(),
-      ]);
+      const [defsResult, badgesResult, ranksResult, metricsResult, ledgerResult, profileResult] =
+        await Promise.all([
+          supabase.from("badge_definitions").select("*").eq("enabled", true).order("sort_order"),
+          supabase.from("user_badges").select("badge_key,recipient_number,pinned,awarded_at"),
+          supabase.rpc("my_badge_ranks"),
+          supabase.rpc("my_badge_metrics"),
+          supabase.from("xp_ledger").select("event_key,amount,reason,created_at").order("created_at", { ascending: false }).limit(50),
+          supabase.from("profiles").select("xp").eq("id", (await supabase.auth.getUser()).data.user?.id ?? "").maybeSingle(),
+        ]);
       setDefinitions((defsResult.data ?? []) as BadgeDefinition[]);
       setMyBadges((badgesResult.data ?? []) as MyBadge[]);
+      setRankAwards((ranksResult.data ?? []) as unknown as RankAwardRow[]);
       setMetrics((metricsResult.data ?? null) as Record<string, number> | null);
       setLedger((ledgerResult.data ?? []) as LedgerEntry[]);
       setXp((profileResult.data as { xp: number | null } | null)?.xp ?? 0);
@@ -82,6 +93,7 @@ export function useGamification() {
       console.error("Unable to load gamification data:", error);
       setDefinitions([]);
       setMyBadges([]);
+      setRankAwards([]);
       setMetrics({});
       setLedger([]);
       setXp(0);
@@ -109,7 +121,47 @@ export function useGamification() {
     await load();
   }
 
-  return { definitions, myBadges, metrics, ledger, xp, reload: load, togglePin };
+  /**
+   * Pin/unpin a collapsed achievement card (one card may back several edition
+   * rows). Pinning targets the highest achieved edition; unpinning clears the
+   * whole family so no orphan edition stays showcased. The 3-pin budget is
+   * enforced across distinct achievements.
+   */
+  async function togglePinFamily(familyKeys: string[], preferredKey: string | null, pinned: boolean) {
+    const supabase = getSupabase();
+    const owned = (myBadges ?? []).filter((badge) => familyKeys.includes(badge.badge_key));
+    if (owned.length === 0) return;
+    const newestOwned = owned.slice().sort((a, b) => b.awarded_at.localeCompare(a.awarded_at))[0];
+    const target =
+      pinned && preferredKey && owned.some((badge) => badge.badge_key === preferredKey)
+        ? preferredKey
+        : (newestOwned?.badge_key ?? owned[0]!.badge_key);
+
+    // Clear every pinned row of the family first (both directions).
+    for (const badge of owned.filter((badge) => badge.pinned)) {
+      await supabase.from("user_badges").update({ pinned: false }).eq("badge_key", badge.badge_key);
+    }
+    if (!pinned) {
+      await load();
+      return;
+    }
+    // Make room in the 3-slot showcase (rows outside this family).
+    const pinnedElsewhere = (myBadges ?? []).filter(
+      (badge) => badge.pinned && !familyKeys.includes(badge.badge_key),
+    );
+    const overflow = pinnedElsewhere.length - 2; // pinning this one makes N+1
+    if (overflow > 0) {
+      const oldest = pinnedElsewhere.sort((a, b) => a.awarded_at.localeCompare(b.awarded_at)).slice(0, overflow);
+      for (const badge of oldest) {
+        await supabase.from("user_badges").update({ pinned: false }).eq("badge_key", badge.badge_key);
+      }
+    }
+    const { error } = await supabase.from("user_badges").update({ pinned: true }).eq("badge_key", target);
+    if (error) throw error;
+    await load();
+  }
+
+  return { definitions, myBadges, rankAwards, metrics, ledger, xp, reload: load, togglePin, togglePinFamily };
 }
 
 export interface BadgeWithState {

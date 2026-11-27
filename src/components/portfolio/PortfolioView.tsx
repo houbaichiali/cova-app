@@ -33,6 +33,7 @@ import {
   type PortfolioProjectRow,
   type PortfolioSkillRow,
 } from "@/lib/profile-data";
+import type { BadgeDefinition } from "@/lib/gamification";
 
 /**
  * /u/[code]/portfolio — the hybrid portfolio. Academic and professional
@@ -100,6 +101,8 @@ export function PortfolioView({ code }: { code: string }) {
   const [mode, setMode] = useState<Mode>("academic");
   const [project, setProject] = useState<PortfolioProjectRow | null>(null);
   const [copied, setCopied] = useState(false);
+  // Definitions enable the collapsed, rank-colored badge marquee + detail view.
+  const [badgeDefs, setBadgeDefs] = useState<BadgeDefinition[] | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -119,6 +122,25 @@ export function PortfolioView({ code }: { code: string }) {
       active = false;
     };
   }, [code]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { data: rows } = await getSupabase()
+          .from("badge_definitions")
+          .select("*")
+          .eq("enabled", true)
+          .order("sort_order");
+        if (active) setBadgeDefs((rows ?? []) as BadgeDefinition[]);
+      } catch {
+        if (active) setBadgeDefs([]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const projects = useMemo(
     () => ((data?.projects ?? []) as PortfolioProjectRow[]),
@@ -339,7 +361,7 @@ export function PortfolioView({ code }: { code: string }) {
         <Card>
           <CardHeader title={t("portfolio.sections.badges")} />
           <CardBody>
-            <BadgeMarquee badges={badges} />
+            <BadgeMarquee badges={badges} definitions={badgeDefs} ownerCode={code} />
           </CardBody>
         </Card>
       )}

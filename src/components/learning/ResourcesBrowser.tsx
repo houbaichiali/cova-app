@@ -12,6 +12,8 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { Tabs } from "@/components/ui/Tabs";
 import { TextAreaField, TextField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useI18n } from "@/i18n/client";
 import { matchesQuery } from "@/lib/utils";
 import { getSupabase } from "@/lib/supabase/client";
@@ -19,7 +21,7 @@ import { RESOURCE_TYPES, type ResourceType, resourceTypeLabel } from "@/lib/reso
 import { demoActions, useDemoState } from "@/lib/demo-store";
 
 const BUCKET = "shared-resources";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+// Size/type limits moved to the shared file policy — src/lib/file-policy.ts.
 const RESOURCE_TABS = ["All resources", "Saved"] as const;
 const CREATABLE_RESOURCE_TYPES = RESOURCE_TYPES.filter((type) => type !== "Exercise");
 
@@ -31,18 +33,6 @@ function isResourceSetupError(error: unknown) {
     /shared_resources|shared-resources|bucket not found/i.test(details?.message ?? "")
   );
 }
-const ALLOWED_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain",
-  "image/png",
-  "image/jpeg",
-]);
 
 type SharedResource = {
   id: string;
@@ -78,6 +68,7 @@ export function ResourcesBrowser() {
   const [category, setCategory] = useState("");
   const [minutes, setMinutes] = useState(5);
   const [file, setFile] = useState<File | null>(null);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
   const [ownedCourses, setOwnedCourses] = useState<CourseOption[]>([]);
   const [courseId, setCourseId] = useState("");
 
@@ -142,12 +133,10 @@ export function ResourcesBrowser() {
   async function submitResource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file || uploading) return;
-    if (!ALLOWED_TYPES.has(file.type)) {
-      toast.push(t("resources.fileTypeError"));
-      return;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      toast.push(t("resources.fileSizeError"));
+    // Spec Phase 4: shared policy (size + type + signature) on shared resources.
+    const check = await validateFile("courseAttachment", file);
+    if (!check.ok) {
+      setFileIssue(check.issue);
       return;
     }
 
@@ -336,7 +325,14 @@ export function ResourcesBrowser() {
           </div>
           <div>
             <label htmlFor="resource-file" className="mb-1.5 block text-sm font-medium">{t("resources.fileLabel")}</label>
-            <input id="resource-file" type="file" required accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />
+            <input id="resource-file" type="file" required accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg" onChange={(event) => { setFileIssue(null); setFile(event.target.files?.[0] ?? null); }} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />
+            {fileIssue && (
+              <FileWarningCard
+                issue={fileIssue}
+                onChooseAnother={() => (document.getElementById("resource-file") as HTMLInputElement | null)?.click()}
+                onDismiss={() => setFileIssue(null)}
+              />
+            )}
             <p className="mt-1 text-xs text-cova-mute">{t("resources.fileHint")}</p>
           </div>
           <div className="flex justify-end gap-2 pt-2">

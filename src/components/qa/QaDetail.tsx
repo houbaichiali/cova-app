@@ -266,6 +266,7 @@ export function QaDetail({ questionId }: { questionId: string }) {
               id="qa-answer"
               label={t("qa.yourAnswer")}
               value={draft}
+              maxLength={1000}
               onChange={(e) => setDraft(e.target.value)}
             />
             <div className="flex justify-end">

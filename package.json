@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run build",
+    "test:logic": "tsx scripts/test-dubbing-logic.ts && tsx scripts/test-round6-logic.ts && tsx scripts/test-xp-levels.ts && tsx scripts/test-security.ts && tsx scripts/test-validation.ts && tsx scripts/test-file-policy.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -42,6 +43,7 @@
     "eslint-config-next": "16.4.6",
     "prettier": "3.9.10",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3"
   }
 }

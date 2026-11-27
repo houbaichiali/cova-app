@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Switch } from "@/components/ui/Switch";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { sanitizeSvgText, validateFile, type FileIssue } from "@/lib/file-policy";
 import { useI18n, useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 import { levelThreshold } from "@/lib/level-curve";
@@ -109,6 +111,7 @@ export function GamificationCenter() {
   // badges
   const [badges, setBadges] = useState<BadgeRow[] | null>(null);
   const [badgesError, setBadgesError] = useState(false);
+  const [uploadIssue, setUploadIssue] = useState<FileIssue | null>(null);
   const [editor, setEditor] = useState<BadgeEditor | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [recipients, setRecipients] = useState<{ badge: BadgeRow; rows: RecipientRow[] } | null>(null);
@@ -231,12 +234,30 @@ export function GamificationCenter() {
 
   async function uploadImage(file: File) {
     if (!editor) return;
-    const ext = file.name.split(".").pop()?.toLowerCase() ?? "png";
-    const path = `badges/${editor.key || "draft"}-${Date.now()}.${ext}`;
+    // Spec Phase 4: badge images pass the shared policy (1,024 KB, PNG/JPG/
+    // WEBP/SVG) with a real signature check, and SVG payloads are sanitized
+    // (scripts, event handlers and external references stripped) before they
+    // reach the public bucket.
+    const check = await validateFile("badgeImage", file);
+    if (!check.ok) {
+      setUploadIssue(check.issue);
+      return;
+    }
+    let payload: File = file;
+    if (check.extension === "svg") {
+      try {
+        const clean = sanitizeSvgText(await file.text());
+        payload = new File([clean], file.name, { type: "image/svg+xml" });
+      } catch {
+        toast.push(t("admin.gamif.uploadError"));
+        return;
+      }
+    }
+    const path = `badges/${editor.key || "draft"}-${Date.now()}.${check.extension}`;
     const supabase = getSupabase();
     const { error: upError } = await supabase.storage
       .from("badge-images")
-      .upload(path, file, { contentType: file.type, upsert: true });
+      .upload(path, payload, { contentType: payload.type, upsert: true });
     if (upError) {
       toast.push(t("admin.gamif.uploadError"));
       return;
@@ -638,9 +659,17 @@ export function GamificationCenter() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
+                  setUploadIssue(null);
                   if (f) void uploadImage(f);
                 }}
               />
+              {uploadIssue && (
+                <FileWarningCard
+                  issue={uploadIssue}
+                  onChooseAnother={() => fileInput.current?.click()}
+                  onDismiss={() => setUploadIssue(null)}
+                />
+              )}
               <Button
                 type="button"
                 variant="secondary"

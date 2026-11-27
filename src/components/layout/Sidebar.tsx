@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { Logo } from "@/components/ui/Logo";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useI18n, useT } from "@/i18n/client";
 import { useAdminAccess } from "@/lib/admin-client";
 import { navSections } from "@/lib/navigation";
@@ -90,13 +91,38 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   {t(section.titleKey)}
                 </p>
                 <ul className="space-y-0.5">
-                  {section.items.map(({ href, labelKey, label, icon: Icon }, index) => {
+                  {section.items.map(({ href, labelKey, label, icon: Icon, tooltipKey }, index) => {
                     if (href === "/admin" && !admin.isAdmin) return null;
                     const active = pathname === href || pathname.startsWith(`${href}/`);
                     const itemKey = `${section.titleKey}-${href}-${index}`;
                     const itemLabel = label ? (label as Record<string, string>)["en"] : undefined;
                     const text = itemLabel ?? (labelKey ? t(labelKey) : href);
                     const showUnread = href === "/notifications" && unread > 0;
+                    const link = (
+                      <Link
+                        href={href}
+                        onClick={onClose}
+                        title={text}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                          dir === "rtl" && "flex-row-reverse",
+                          active
+                            ? "bg-cova-pale text-cova-ink"
+                            : "text-cova-mute hover:bg-cova-bg hover:text-cova-ink",
+                        )}
+                      >
+                        <Icon className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
+                        <span className={cn("flex-1", dir === "rtl" && "text-right", railFade)}>
+                          {text}
+                        </span>
+                        {showUnread && (
+                          <span className="rounded-full bg-cova-soft px-2 py-0.5 text-xs text-cova-ink">
+                            {unread}
+                          </span>
+                        )}
+                      </Link>
+                    );
                     return (
                       <li key={itemKey} className="relative">
                         {showUnread && (
@@ -109,29 +135,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                             )}
                           />
                         )}
-                        <Link
-                          href={href}
-                          onClick={onClose}
-                          title={text}
-                          aria-current={active ? "page" : undefined}
-                          className={cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                            dir === "rtl" && "flex-row-reverse",
-                            active
-                              ? "bg-cova-pale text-cova-ink"
-                              : "text-cova-mute hover:bg-cova-bg hover:text-cova-ink",
-                          )}
-                        >
-                          <Icon className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
-                          <span className={cn("flex-1", dir === "rtl" && "text-right", railFade)}>
-                            {text}
-                          </span>
-                          {showUnread && (
-                            <span className="rounded-full bg-cova-soft px-2 py-0.5 text-xs text-cova-ink">
-                              {unread}
-                            </span>
-                          )}
-                        </Link>
+                        {tooltipKey ? <Tooltip label={t(tooltipKey)}>{link}</Tooltip> : link}
                       </li>
                     );
                   })}
