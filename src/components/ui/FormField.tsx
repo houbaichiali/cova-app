@@ -26,7 +26,7 @@ export function FieldShell({ id, label, error, hint, children }: FieldShellProps
       {children}
       {hint && !error && <p className="text-xs text-cova-mute">{hint}</p>}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-xs font-medium text-red-800">
+        <p id={`${id}-error`} role="alert" className="text-xs font-medium text-cova-error">
           {error}
         </p>
       )}

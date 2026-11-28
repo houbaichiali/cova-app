@@ -116,7 +116,7 @@ export function UserMenu() {
             <Link href="/admin" role="menuitem" onClick={close} className={itemClass}>
               <ShieldCheck className="h-4 w-4 text-cova-muted" aria-hidden="true" />
               {t("admin.switch.toAdmin")}
-              {!admin.mfaOk && <span className="ms-auto text-xs text-amber-700">{t("admin.mfa.requiredShort")}</span>}
+              {!admin.mfaOk && <span className="ms-auto text-xs text-cova-warning">{t("admin.mfa.requiredShort")}</span>}
             </Link>
           )}
 

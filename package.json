@@ -20,12 +20,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run build",
-    "test:logic": "tsx scripts/test-dubbing-logic.ts && tsx scripts/test-round6-logic.ts && tsx scripts/test-xp-levels.ts && tsx scripts/test-security.ts && tsx scripts/test-validation.ts && tsx scripts/test-file-policy.ts"
+    "test:logic": "tsx scripts/test-badge-progression.ts && tsx scripts/test-dubbing-logic.ts && tsx scripts/test-round6-logic.ts && tsx scripts/test-xp-levels.ts && tsx scripts/test-security.ts && tsx scripts/test-palettes.ts && tsx scripts/test-validation.ts && tsx scripts/test-file-policy.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",
     "lucide-react": "1.55.0",
+    "motion": "^14.14.0",
     "next": "16.4.6",
     "qrcode": "^1.5.4",
     "react": "19.3.0",

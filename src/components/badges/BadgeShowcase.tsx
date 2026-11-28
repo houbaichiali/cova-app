@@ -5,6 +5,7 @@ import { Award, SearchX } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { StaggerGroup, StaggerItem } from "@/components/ui/Motion";
 import { useS } from "@/i18n/spaces";
 import { cn } from "@/lib/utils";
 import { CATEGORIES, RARITIES, rarityStyle } from "@/lib/badge-ranks";
@@ -160,18 +161,19 @@ export function BadgeShowcase({ achievements, isOwner, onTogglePin, xpHeader }: 
       ) : visible.length === 0 ? (
         <EmptyState icon={SearchX} title={t("gm.showcase.noMatchTitle")} description={t("gm.showcase.noMatchDescription")} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <StaggerGroup className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" stagger={0.05}>
           {visible.map((item) => (
-            <BadgeCard
-              key={item.key}
-              achievement={item}
-              onOpen={setSelected}
-              pinnable={isOwner && !!onTogglePin}
-              pinned={item.pinned}
-              onTogglePin={onTogglePin}
-            />
+            <StaggerItem key={item.key}>
+              <BadgeCard
+                achievement={item}
+                onOpen={setSelected}
+                pinnable={isOwner && !!onTogglePin}
+                pinned={item.pinned}
+                onTogglePin={onTogglePin}
+              />
+            </StaggerItem>
           ))}
-        </div>
+        </StaggerGroup>
       )}
 
       <BadgeDetailModal achievement={selected} onClose={() => setSelected(null)} />

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import { motion } from "motion/react";
 import { X } from "lucide-react";
 import { useT } from "@/i18n/client";
+import { EASE_PREMIUM } from "@/lib/motion";
 
 interface ModalProps {
   open: boolean;
@@ -38,8 +40,15 @@ export function Modal({ open, onClose, title, description, children, size = "md"
         size === "lg" ? "max-w-2xl" : "max-w-lg"
       }`}
     >
+      {/* Balanced & Premium entrance: the panel rises subtly from its trigger
+          side; the native <dialog> keeps the focus trap and Escape handling. */}
       {open && (
-        <div className="p-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.97, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: EASE_PREMIUM }}
+          className="p-6"
+        >
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="modal-title" className="text-lg font-semibold">
@@ -57,7 +66,7 @@ export function Modal({ open, onClose, title, description, children, size = "md"
             </button>
           </div>
           <div className="mt-5">{children}</div>
-        </div>
+        </motion.div>
       )}
     </dialog>
   );

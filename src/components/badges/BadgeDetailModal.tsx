@@ -1,10 +1,12 @@
 "use client";
 
 import { Check, Lock, Trophy } from "lucide-react";
+import { motion } from "motion/react";
 import { Modal } from "@/components/ui/Modal";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useS } from "@/i18n/spaces";
 import { cn } from "@/lib/utils";
+import { layoutTransition } from "@/lib/motion";
 import { rankName, rankStyle, rarityStyle, RANK_COUNT } from "@/lib/badge-ranks";
 import type { Achievement, BadgeTier } from "@/lib/badge-collection";
 
@@ -38,7 +40,11 @@ export function BadgeDetailModal({ achievement, onClose }: BadgeDetailModalProps
       <div className="space-y-5">
         {/* Hero: current appearance + rank + stat */}
         <div className="flex flex-col items-center gap-4 rounded-xl border border-cova-line bg-cova-bg p-4 sm:flex-row sm:items-center">
-          <span
+          {/* Same layoutId as the card circle: the trophy morphs from the
+              grid card into this hero on open. */}
+          <motion.span
+            layoutId={`badge-trophy-${achievement.key}`}
+            transition={layoutTransition}
             className={cn(
               "cova-badge-shine flex h-20 w-20 shrink-0 items-center justify-center rounded-full shadow-lg",
               unlocked ? cn("bg-gradient-to-br", currentStyle.gradient) : "bg-cova-pale text-cova-mute grayscale",
@@ -46,7 +52,7 @@ export function BadgeDetailModal({ achievement, onClose }: BadgeDetailModalProps
             aria-hidden="true"
           >
             {unlocked ? <Trophy className={cn("h-9 w-9 drop-shadow", currentStyle.text)} /> : <Lock className="h-8 w-8" />}
-          </span>
+          </motion.span>
           <div className="min-w-0 flex-1 text-center sm:text-start">
             <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
               <span

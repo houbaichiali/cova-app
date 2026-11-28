@@ -102,7 +102,7 @@ export function SuggestedGroups() {
         {loading ? (
           <p className="text-sm text-cova-mute">{t("dashboard.loadingGroups")}</p>
         ) : error ? (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="text-sm text-cova-error">
             {error}
           </p>
         ) : suggestions.length === 0 ? (

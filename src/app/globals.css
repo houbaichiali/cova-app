@@ -12,6 +12,24 @@
   --color-cova-mute: #64748b;
   --color-cova-line: #e5edf3;
 
+  /* Semantic surfaces and states. Soft Blue is the default palette: these are
+     its light values. Any other palette overrides the same variables under
+     html[data-palette="…"] (plus .dark for the dark mode) — see the palette
+     system at the bottom of this file. Contrast verified by
+     scripts/palette_charter.py; full table in docs/palette-charter.md. */
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #ffffff;
+  --color-cova-primary: #3e6c99;
+  /* Readable label on solid primary surfaces: white in light palettes, the
+     dark surface tone in dark palettes (dark primaries are light colors). */
+  --color-cova-on-primary: #ffffff;
+  --color-cova-accent: #6f9fba;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #dc2626;
+  --color-cova-info: #2563eb;
+  --color-cova-focus: #243447;
+
   /* Admin Center navy (Hybrid Premium sidebar) — tokenized so the admin
    * chrome follows the dark theme like the rest of the app. The active/hover
    * tokens keep the selected page readable in every brand palette and both
@@ -22,10 +40,54 @@
   --color-admin-active: rgba(255, 255, 255, 0.15);
   --color-admin-hover: rgba(255, 255, 255, 0.08);
 
+  /* Interface face (next/font, self-hosted in src/app/layout.tsx). Manrope
+     covers UI, buttons, nav, forms and data; unknown scripts (e.g. Arabic)
+     fall back to the system stack. */
   --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
+    var(--font-manrope), "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Editorial display face for big titles and brand accents only — the
+     "Academic Editorial" half of the COVA art direction. */
+  --font-display: var(--font-playfair), Georgia, "Times New Roman", serif;
+
+  /* Typographic hierarchy (Tailwind 4 --text-* tokens → text-display,
+     text-h1, …). Body copy stays on the default text-base / text-sm steps. */
+  --text-display: clamp(2.25rem, 1.8rem + 2.2vw, 3.5rem);
+  --text-display--line-height: 1.08;
+  --text-display--letter-spacing: -0.01em;
+  --text-h1: clamp(1.75rem, 1.5rem + 1.2vw, 2.5rem);
+  --text-h1--line-height: 1.15;
+  --text-h2: clamp(1.375rem, 1.25rem + 0.6vw, 1.75rem);
+  --text-h2--line-height: 1.2;
+  --text-h3: clamp(1.125rem, 1.0625rem + 0.3vw, 1.3125rem);
+  --text-h3--line-height: 1.3;
+  --text-h4: 1.0625rem;
+  --text-h4--line-height: 1.35;
+  --text-body-lg: 1.0625rem;
+  --text-body-lg--line-height: 1.6;
+  --text-body-sm: 0.9375rem;
+  --text-body-sm--line-height: 1.55;
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.45;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: 0.06em;
+  --text-data: 0.9375rem;
+  --text-data--line-height: 1.4;
+
+  /* Intelligent Fibonacci spacing (rem so it scales with the text-size
+     preference): 4 / 8 / 13 / 21 / 34 / 55 / 89 px at a 16 px root. The 4 px
+     grid stays available through the default Tailwind scale — Fibonacci sets
+     the rhythm, not a straitjacket. */
+  --spacing-fib-1: 0.25rem;
+  --spacing-fib-2: 0.5rem;
+  --spacing-fib-3: 0.8125rem;
+  --spacing-fib-4: 1.3125rem;
+  --spacing-fib-5: 2.125rem;
+  --spacing-fib-6: 3.4375rem;
+  --spacing-fib-7: 5.5625rem;
 }
 
 html {
@@ -128,9 +190,20 @@ html.dark {
   --color-cova-ink: #e7eef6;
   --color-cova-mute: #94a8bc;
   --color-cova-line: #223247;
+  --color-cova-surface: #101b2d;
+  --color-cova-elevated: #17253a;
+  --color-cova-primary: #8fb8d9;
+  --color-cova-on-primary: #0b1220;
+  --color-cova-accent: #6f9fba;
+  --color-cova-success: #4fc968;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #74c0fc;
+  --color-cova-focus: #8fb8d9;
   --color-white: #101b2d;
   --color-admin-navy: #101b2d;
   --color-admin-navy-line: rgba(255, 255, 255, 0.08);
+  --coding-neon: #6fb7e0;
 }
 
 /* --------------------------------------------------------------- theme toggle */
@@ -228,7 +301,7 @@ html.dark {
   position: absolute;
   inset: auto 0 0 0;
   height: 0;
-  background: #33627a;
+  background: var(--color-cova-muted);
   transition: height 0.3s ease;
 }
 
@@ -285,7 +358,7 @@ html.dark {
 
 .dlb.done {
   width: 96px;
-  border-color: #2fae43;
+  border-color: var(--color-cova-success);
 }
 
 .dlb.done .dlb__circle {
@@ -296,7 +369,7 @@ html.dark {
 .dlb.done .dlb__title {
   inset-inline: 0;
   text-align: center;
-  color: #2fae43;
+  color: var(--color-cova-success);
   font-weight: 600;
 }
 
@@ -403,6 +476,538 @@ html.dark {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-\[cova-marquee_32s_linear_infinite\] {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------- palette system
+   11 approved palettes × light/dark. Soft Blue is the default: its values
+   live in @theme (light) and html.dark (dark) above. Every other palette is
+   activated by html[data-palette="…"] and overrides the same semantic tokens;
+   the .dark compound selector covers its dark mode. --color-white follows the
+   surface in dark mode so existing bg-white utilities keep re-theming the
+   whole app. The Coding Lab neon token (--coding-neon) follows its palette.
+   Every text/UI pair below was verified against WCAG thresholds — see
+   scripts/palette_charter.py and docs/palette-charter.md. */
+:root {
+  --coding-neon: #5fa8d3;
+}
+
+/* Three Blue — monochromatic triple-blue system (deep / mid / light). */
+html[data-palette="three-blue"] {
+  --color-cova-pale: #dfeaf5;
+  --color-cova-soft: #a5c4e0;
+  --color-cova-muted: #3e76ad;
+  --color-cova-bg: #f3f7fb;
+  --color-cova-ink: #14273d;
+  --color-cova-mute: #4f6a85;
+  --color-cova-line: #dfe8f1;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #ffffff;
+  --color-cova-primary: #1f5a96;
+  --color-cova-accent: #3e9ad2;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #dc2626;
+  --color-cova-info: #1f5a96;
+  --color-cova-focus: #1f5a96;
+  --color-admin-navy: #12253a;
+  --coding-neon: #2f9fd6;
+}
+
+html[data-palette="three-blue"].dark {
+  --color-cova-pale: #1c3049;
+  --color-cova-soft: #2c4f74;
+  --color-cova-muted: #5f9ecb;
+  --color-cova-bg: #0c1520;
+  --color-cova-ink: #e6eef6;
+  --color-cova-mute: #9db4c9;
+  --color-cova-line: #25384c;
+  --color-cova-surface: #14212f;
+  --color-cova-elevated: #1c2c3d;
+  --color-cova-primary: #6fb1e0;
+  --color-cova-on-primary: #0c1520;
+  --color-cova-accent: #5aa9dc;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff6b6b;
+  --color-cova-info: #74c0fc;
+  --color-cova-focus: #6fb1e0;
+  --color-white: #14212f;
+  --color-admin-navy: #14212f;
+  --coding-neon: #38bdf8;
+}
+
+/* Academic Tech Premium — the official direction: warm ivory paper, deep
+   academic ink, a restrained tech-violet accent. */
+html[data-palette="academic-tech-premium"] {
+  --color-cova-pale: #e5e9f0;
+  --color-cova-soft: #b9c6d8;
+  --color-cova-muted: #52708f;
+  --color-cova-bg: #f8f7f4;
+  --color-cova-ink: #1d2b3a;
+  --color-cova-mute: #5c6b7a;
+  --color-cova-line: #e6e4de;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fbfaf8;
+  --color-cova-primary: #23486f;
+  --color-cova-accent: #6455d8;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #23486f;
+  --color-cova-focus: #23486f;
+  --color-admin-navy: #1d2b3a;
+  --coding-neon: #8b7ff0;
+}
+
+html[data-palette="academic-tech-premium"].dark {
+  --color-cova-pale: #222e3d;
+  --color-cova-soft: #3a4f66;
+  --color-cova-muted: #7c95b0;
+  --color-cova-bg: #12161d;
+  --color-cova-ink: #e9ecef;
+  --color-cova-mute: #a2b0bd;
+  --color-cova-line: #2c3745;
+  --color-cova-surface: #1a212b;
+  --color-cova-elevated: #232c38;
+  --color-cova-primary: #93b0d0;
+  --color-cova-on-primary: #12161d;
+  --color-cova-accent: #9d8ff0;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #91caff;
+  --color-cova-focus: #93b0d0;
+  --color-white: #1a212b;
+  --color-admin-navy: #1a212b;
+  --coding-neon: #a79bff;
+}
+
+/* Forest & Copper — deep forest green with a warm copper accent. */
+html[data-palette="forest-copper"] {
+  --color-cova-pale: #e0ebdb;
+  --color-cova-soft: #acc9a9;
+  --color-cova-muted: #4f7f52;
+  --color-cova-bg: #f5f8f3;
+  --color-cova-ink: #1f2f25;
+  --color-cova-mute: #56685a;
+  --color-cova-line: #e1e8dc;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fbfcf9;
+  --color-cova-primary: #2e5c3a;
+  --color-cova-accent: #b26a35;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #2c7a8c;
+  --color-cova-focus: #2e5c3a;
+  --color-admin-navy: #1f2f25;
+  --coding-neon: #e08b4e;
+}
+
+html[data-palette="forest-copper"].dark {
+  --color-cova-pale: #233122;
+  --color-cova-soft: #38513c;
+  --color-cova-muted: #6fa571;
+  --color-cova-bg: #111813;
+  --color-cova-ink: #e8efe7;
+  --color-cova-mute: #9fb3a1;
+  --color-cova-line: #2b3a2d;
+  --color-cova-surface: #19221b;
+  --color-cova-elevated: #222d23;
+  --color-cova-primary: #7fbd85;
+  --color-cova-on-primary: #111813;
+  --color-cova-accent: #d8925d;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #66c2cf;
+  --color-cova-focus: #7fbd85;
+  --color-white: #19221b;
+  --color-admin-navy: #19221b;
+  --coding-neon: #eda36a;
+}
+
+/* Midnight Lavender — soft lavender-tinted light mode, deep violet dark mode. */
+html[data-palette="midnight-lavender"] {
+  --color-cova-pale: #e7e3f4;
+  --color-cova-soft: #c2b8e2;
+  --color-cova-muted: #8574b8;
+  --color-cova-bg: #f6f5fa;
+  --color-cova-ink: #262038;
+  --color-cova-mute: #5f5a75;
+  --color-cova-line: #e7e4ef;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fcfbfe;
+  --color-cova-primary: #5e4fa3;
+  --color-cova-accent: #9d7be0;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #5e4fa3;
+  --color-cova-focus: #5e4fa3;
+  --color-admin-navy: #262038;
+  --coding-neon: #8f76e8;
+}
+
+html[data-palette="midnight-lavender"].dark {
+  --color-cova-pale: #262140;
+  --color-cova-soft: #3f3660;
+  --color-cova-muted: #8f7fc2;
+  --color-cova-bg: #13111e;
+  --color-cova-ink: #ece9f6;
+  --color-cova-mute: #a89fc6;
+  --color-cova-line: #2f2a44;
+  --color-cova-surface: #1c192b;
+  --color-cova-elevated: #262238;
+  --color-cova-primary: #a58fe0;
+  --color-cova-on-primary: #13111e;
+  --color-cova-accent: #b593f2;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #b197fc;
+  --color-cova-focus: #a58fe0;
+  --color-white: #1c192b;
+  --color-admin-navy: #1c192b;
+  --coding-neon: #c3abff;
+}
+
+/* Arctic Minimal — ultra-clean cool grays with a glacier-blue accent. */
+html[data-palette="arctic-minimal"] {
+  --color-cova-pale: #e6eef4;
+  --color-cova-soft: #b5d0e0;
+  --color-cova-muted: #4f88ab;
+  --color-cova-bg: #fafbfc;
+  --color-cova-ink: #1e2831;
+  --color-cova-mute: #5a6b78;
+  --color-cova-line: #e4eaee;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #ffffff;
+  --color-cova-primary: #2e6f96;
+  --color-cova-accent: #38a3c5;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #2e6f96;
+  --color-cova-focus: #2e6f96;
+  --color-admin-navy: #1e2831;
+  --coding-neon: #2ba7c2;
+}
+
+html[data-palette="arctic-minimal"].dark {
+  --color-cova-pale: #1d2830;
+  --color-cova-soft: #2e4859;
+  --color-cova-muted: #5f97b8;
+  --color-cova-bg: #0f1417;
+  --color-cova-ink: #e7edf1;
+  --color-cova-mute: #9aabb8;
+  --color-cova-line: #273138;
+  --color-cova-surface: #171d21;
+  --color-cova-elevated: #20282d;
+  --color-cova-primary: #74b3d6;
+  --color-cova-on-primary: #0f1417;
+  --color-cova-accent: #58b8d4;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #74c0fc;
+  --color-cova-focus: #74b3d6;
+  --color-white: #171d21;
+  --color-admin-navy: #171d21;
+  --coding-neon: #63d8ea;
+}
+
+/* Burgundy & Champagne — rich burgundy with a champagne-gold accent. */
+html[data-palette="burgundy-champagne"] {
+  --color-cova-pale: #f1e0e3;
+  --color-cova-soft: #d6b0bb;
+  --color-cova-muted: #96566b;
+  --color-cova-bg: #faf5f3;
+  --color-cova-ink: #2e2126;
+  --color-cova-mute: #6b555e;
+  --color-cova-line: #ebe0dc;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fdfaf8;
+  --color-cova-primary: #6e1f3b;
+  --color-cova-accent: #b9965c;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #4a6d8c;
+  --color-cova-focus: #6e1f3b;
+  --color-admin-navy: #2e2126;
+  --coding-neon: #c99a55;
+}
+
+html[data-palette="burgundy-champagne"].dark {
+  --color-cova-pale: #33222b;
+  --color-cova-soft: #523440;
+  --color-cova-muted: #a5627b;
+  --color-cova-bg: #1b1216;
+  --color-cova-ink: #f3e8eb;
+  --color-cova-mute: #b59aa4;
+  --color-cova-line: #3c2b33;
+  --color-cova-surface: #261a1f;
+  --color-cova-elevated: #302329;
+  --color-cova-primary: #cf7f95;
+  --color-cova-on-primary: #1b1216;
+  --color-cova-accent: #d9b87e;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #89b3d1;
+  --color-cova-focus: #cf7f95;
+  --color-white: #261a1f;
+  --color-admin-navy: #261a1f;
+  --coding-neon: #e8c28a;
+}
+
+/* Sage & Stone — muted sage green with a warm stone accent. */
+html[data-palette="sage-stone"] {
+  --color-cova-pale: #e4eade;
+  --color-cova-soft: #bcc9b2;
+  --color-cova-muted: #71876a;
+  --color-cova-bg: #f6f7f3;
+  --color-cova-ink: #272e26;
+  --color-cova-mute: #5d665b;
+  --color-cova-line: #e3e6dd;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fcfcfa;
+  --color-cova-primary: #4e6b48;
+  --color-cova-accent: #9a8670;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #4a6d8c;
+  --color-cova-focus: #4e6b48;
+  --color-admin-navy: #272e26;
+  --coding-neon: #7fae62;
+}
+
+html[data-palette="sage-stone"].dark {
+  --color-cova-pale: #252d21;
+  --color-cova-soft: #3c4a38;
+  --color-cova-muted: #7e977a;
+  --color-cova-bg: #141613;
+  --color-cova-ink: #eaeee7;
+  --color-cova-mute: #a5b0a1;
+  --color-cova-line: #30362d;
+  --color-cova-surface: #1d201b;
+  --color-cova-elevated: #262a24;
+  --color-cova-primary: #8fb28a;
+  --color-cova-on-primary: #141613;
+  --color-cova-accent: #b3a089;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #89b3d1;
+  --color-cova-focus: #8fb28a;
+  --color-white: #1d201b;
+  --color-admin-navy: #1d201b;
+  --coding-neon: #b8d9a0;
+}
+
+/* Sand & Terracotta — warm sand paper with a terracotta accent. */
+html[data-palette="sand-terracotta"] {
+  --color-cova-pale: #f3e4d2;
+  --color-cova-soft: #dcbfa2;
+  --color-cova-muted: #ad7345;
+  --color-cova-bg: #faf4ec;
+  --color-cova-ink: #31261e;
+  --color-cova-mute: #6d5c4e;
+  --color-cova-line: #ecdfcf;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fdf9f4;
+  --color-cova-primary: #a34f30;
+  --color-cova-accent: #d97b46;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #3e7291;
+  --color-cova-focus: #a34f30;
+  --color-admin-navy: #31261e;
+  --coding-neon: #d9743a;
+}
+
+html[data-palette="sand-terracotta"].dark {
+  --color-cova-pale: #322620;
+  --color-cova-soft: #4d3a2e;
+  --color-cova-muted: #a97a52;
+  --color-cova-bg: #1c1410;
+  --color-cova-ink: #f4eadd;
+  --color-cova-mute: #bda694;
+  --color-cova-line: #3e3026;
+  --color-cova-surface: #271e18;
+  --color-cova-elevated: #31261e;
+  --color-cova-primary: #dc8f63;
+  --color-cova-on-primary: #1c1410;
+  --color-cova-accent: #e6905c;
+  --color-cova-success: #51cf66;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #8ab6d4;
+  --color-cova-focus: #dc8f63;
+  --color-white: #271e18;
+  --color-admin-navy: #271e18;
+  --coding-neon: #f5a878;
+}
+
+/* Graphite & Electric Mint — cool graphite surfaces with an electric-mint
+   accent that carries the Coding Lab neon. */
+html[data-palette="graphite-mint"] {
+  --color-cova-pale: #e3e9e7;
+  --color-cova-soft: #b4c6c0;
+  --color-cova-muted: #3f7a68;
+  --color-cova-bg: #f5f6f7;
+  --color-cova-ink: #1f262b;
+  --color-cova-mute: #5c6870;
+  --color-cova-line: #e2e6e9;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #fbfcfc;
+  --color-cova-primary: #34424e;
+  --color-cova-accent: #0ca678;
+  --color-cova-success: #0ca678;
+  --color-cova-warning: #b45309;
+  --color-cova-error: #d64545;
+  --color-cova-info: #3b6c94;
+  --color-cova-focus: #34424e;
+  --color-admin-navy: #1f262b;
+  --coding-neon: #0aa87d;
+}
+
+html[data-palette="graphite-mint"].dark {
+  --color-cova-pale: #1e2b28;
+  --color-cova-soft: #2f4a43;
+  --color-cova-muted: #4fae94;
+  --color-cova-bg: #101315;
+  --color-cova-ink: #eaf0f2;
+  --color-cova-mute: #9babb4;
+  --color-cova-line: #2c353b;
+  --color-cova-surface: #181d20;
+  --color-cova-elevated: #22282c;
+  --color-cova-primary: #8298a5;
+  --color-cova-on-primary: #101315;
+  --color-cova-accent: #2ee6ac;
+  --color-cova-success: #2ee6ac;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff7070;
+  --color-cova-info: #74c0fc;
+  --color-cova-focus: #8298a5;
+  --color-white: #181d20;
+  --color-admin-navy: #181d20;
+  --coding-neon: #35f0b4;
+}
+
+/* Mono Creative — approved identity: grayscale surfaces with the orange
+   accent (#FF6338 light / #FF754F dark) as the only chromatic voice. The
+   orange also carries the focus ring (darkened to #D94E27 in light mode for
+   the 3:1 focus-visibility minimum; the accent token itself stays approved). */
+html[data-palette="mono-creative"] {
+  --color-cova-pale: #f0f0ee;
+  --color-cova-soft: #d9d9d6;
+  --color-cova-muted: #b8b8b8;
+  --color-cova-bg: #f5f5f3;
+  --color-cova-ink: #252525;
+  --color-cova-mute: #5c5c5a;
+  --color-cova-line: #e4e4e1;
+  --color-cova-surface: #ffffff;
+  --color-cova-elevated: #ffffff;
+  --color-cova-primary: #252525;
+  --color-cova-accent: #ff6338;
+  --color-cova-success: #2f9e44;
+  --color-cova-warning: #d97706;
+  --color-cova-error: #e03131;
+  --color-cova-info: #1c7ed6;
+  --color-cova-focus: #d94e27;
+  --color-admin-navy: #252525;
+  --coding-neon: #ff6338;
+}
+
+html[data-palette="mono-creative"].dark {
+  --color-cova-pale: #232323;
+  --color-cova-soft: #363636;
+  --color-cova-muted: #b8b8b8;
+  --color-cova-bg: #090909;
+  --color-cova-ink: #ffffff;
+  --color-cova-mute: #b8b8b8;
+  --color-cova-line: #2a2a2a;
+  --color-cova-surface: #191919;
+  --color-cova-elevated: #292929;
+  --color-cova-primary: #ececea;
+  --color-cova-on-primary: #090909;
+  --color-cova-accent: #ff754f;
+  --color-cova-success: #4fc968;
+  --color-cova-warning: #fcc419;
+  --color-cova-error: #ff6b6b;
+  --color-cova-info: #74c0fc;
+  --color-cova-focus: #ff754f;
+  --color-white: #191919;
+  --color-admin-navy: #191919;
+  --coding-neon: #ff754f;
+}
+
+/* ------------------------------------------------- coding lab neon border
+   Exclusive to the Coding Lab cards: a light beam travels along the card
+   border on hover — a conic-gradient masked down to a 1px ring, so it never
+   covers the content. The beam color follows the active palette through
+   --coding-neon (defined per palette above). Desktop fine pointers only,
+   keyboard focus gets the same treatment, prefers-reduced-motion keeps a
+   static ring instead of the rotation, and browsers without @property simply
+   show the static ring. */
+@property --neon-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.cova-neon-card {
+  position: relative;
+  isolation: isolate;
+}
+
+.cova-neon-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--neon-angle),
+    transparent 0deg,
+    var(--coding-neon) 80deg,
+    transparent 120deg
+  );
+  opacity: 0;
+  transition: opacity 250ms ease;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes neon-rotate {
+  to {
+    --neon-angle: 360deg;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cova-neon-card:hover::before,
+  .cova-neon-card:focus-visible::before {
+    opacity: 1;
+    animation: neon-rotate 3s linear infinite;
+  }
+}
+
+/* Reduced motion: the ring still appears on hover (a static accent, not an
+   animation) but the beam stops rotating. */
+@media (prefers-reduced-motion: reduce) {
+  .cova-neon-card:hover::before,
+  .cova-neon-card:focus-visible::before {
     animation: none;
   }
 }

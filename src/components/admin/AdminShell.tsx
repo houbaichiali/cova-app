@@ -1,12 +1,31 @@
+
 "use client";
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, BarChart3, BookOpenCheck, LayoutDashboard, Menu, ScrollText, Settings, ShieldAlert, ShieldPlus, SlidersHorizontal, Trophy, UserCog, Users, X } from "lucide-react";
+import {
+  ArrowLeft,
+  BarChart3,
+  BookOpenCheck,
+  LayoutDashboard,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ScrollText,
+  Settings,
+  ShieldAlert,
+  ShieldPlus,
+  SlidersHorizontal,
+  Trophy,
+  UserCog,
+  Users,
+  X,
+} from "lucide-react";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useAdminAccess } from "@/lib/admin-client";
 import { useI18n, useT } from "@/i18n/client";
+import { useSidebarPreference } from "@/lib/sidebar";
 import { cn } from "@/lib/utils";
 
 interface AdminNavItem {
@@ -43,14 +62,24 @@ const NAV_ITEMS: AdminNavItem[] = [
 ];
 
 /** Hybrid Premium admin chrome: navy sidebar, light workspace, COVA accents.
- * Fully RTL-mirrored (Arabic) like the student AppShell. */
+ * Fully RTL-mirrored (Arabic) like the student AppShell.
+ * Push layout: on desktop the navy sidebar owns its grid column (collapsed
+ * 64px rail / expanded 240px panel, persisted) — the workspace narrows and
+ * reflows, never hidden behind an overlay. Mobile keeps the drawer. */
 export function AdminShell({ children }: { children: ReactNode }) {
   const t = useT();
   const { dir } = useI18n();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const { collapsed, toggle: toggleSidebar } = useSidebarPreference("cova-admin-sidebar", false);
   const access = useAdminAccess();
   const rtl = dir === "rtl";
+
+  // Admin labels fade in place when the rail collapses.
+  const labelFade = cn(
+    "whitespace-nowrap transition-opacity duration-200",
+    collapsed ? "lg:opacity-0" : "lg:opacity-100",
+  );
 
   return (
     <div dir={dir} className="min-h-screen bg-cova-bg">
@@ -60,99 +89,154 @@ export function AdminShell({ children }: { children: ReactNode }) {
       >
         {t("common.skip")}
       </a>
+
       {open && (
-        <div className="fixed inset-0 z-30 bg-cova-ink/50 lg:hidden" onClick={() => setOpen(false)} aria-hidden="true" />
+        <div
+          className="fixed inset-0 z-30 bg-cova-ink/50 lg:hidden"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
       )}
 
-      {/* Navy sidebar (always dark — the Hybrid Premium admin identity) */}
-      <aside
-        aria-label={t("admin.center.title")}
+      <div
         className={cn(
-          "fixed inset-y-0 z-40 flex w-60 flex-col bg-admin-navy text-slate-200 transition-transform lg:translate-x-0",
-          rtl ? "right-0" : "left-0",
-          open ? "translate-x-0" : rtl ? "translate-x-full" : "-translate-x-full",
+          "grid min-h-screen grid-cols-[minmax(0,1fr)] transition-[grid-template-columns] duration-300 ease-in-out",
+          collapsed
+            ? "lg:grid-cols-[64px_minmax(0,1fr)]"
+            : "lg:grid-cols-[240px_minmax(0,1fr)]",
         )}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-admin-navy-line px-5">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white">
-              A
-            </span>
-            <span className="text-sm font-semibold uppercase tracking-[0.16em] text-white">
-              {t("admin.center.title")}
-            </span>
+        {/* Navy sidebar (always dark — the Hybrid Premium admin identity) */}
+        <aside
+          aria-label={t("admin.center.title")}
+          className={cn(
+            "flex flex-col overflow-hidden bg-admin-navy text-slate-200",
+            "max-lg:fixed max-lg:inset-y-0 max-lg:z-40 max-lg:w-60 max-lg:transition-transform max-lg:duration-200",
+            "lg:sticky lg:top-0 lg:h-screen lg:w-auto",
+            rtl ? "max-lg:right-0" : "max-lg:left-0",
+            open
+              ? "max-lg:translate-x-0"
+              : rtl
+                ? "max-lg:translate-x-full"
+                : "max-lg:-translate-x-full",
+          )}
+        >
+          <div
+            className={cn(
+              "flex h-16 shrink-0 items-center justify-between border-b border-admin-navy-line",
+              collapsed ? "lg:px-4" : "px-5",
+            )}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white">
+                A
+              </span>
+              <span className={cn(labelFade, "text-sm font-semibold uppercase tracking-[0.16em] text-white")}>
+                {t("admin.center.title")}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label={t("common.closeNav")}
+              className="rounded-lg p-1.5 text-slate-300 hover:bg-white/10 lg:hidden"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
           </div>
+
+          <nav className="cova-scroll-hide min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
+            {NAV_ITEMS.map(({ href, labelKey, icon: Icon, permission, tooltipKey }) => {
+              if (permission && !access.can(permission)) return null;
+
+              const active = pathname === href || pathname.startsWith(`${href}/`);
+
+              const link = (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setOpen(false)}
+                  title={t(labelKey)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                    active
+                      ? "bg-admin-active text-white"
+                      : "text-slate-300 hover:bg-admin-hover hover:text-white",
+                  )}
+                >
+                  <Icon className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
+                  <span className={labelFade}>{t(labelKey)}</span>
+                </Link>
+              );
+
+              return tooltipKey ? (
+                <Tooltip key={href} label={t(tooltipKey)}>
+                  {link}
+                </Tooltip>
+              ) : (
+                link
+              );
+            })}
+          </nav>
+
+          <div className="space-y-1 border-t border-admin-navy-line p-3">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-expanded={!collapsed}
+              title={t("nav.toggleSidebar")}
+              className="hidden w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-admin-hover hover:text-white lg:flex"
+            >
+              {collapsed ? (
+                <PanelLeftOpen
+                  className={cn("h-4.5 w-4.5 shrink-0", rtl && "rotate-180")}
+                  aria-hidden="true"
+                />
+              ) : (
+                <PanelLeftClose
+                  className={cn("h-4.5 w-4.5 shrink-0", rtl && "rotate-180")}
+                  aria-hidden="true"
+                />
+              )}
+              <span className={labelFade}>{t("nav.toggleSidebar")}</span>
+            </button>
+
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-admin-hover hover:text-white"
+            >
+              <ArrowLeft
+                className={cn("h-4.5 w-4.5 shrink-0", rtl && "rotate-180")}
+                aria-hidden="true"
+              />
+              <span className={labelFade}>{t("admin.nav.backToStudent")}</span>
+            </Link>
+          </div>
+        </aside>
+
+        {/* Mobile top bar */}
+        <div className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-admin-navy-line bg-admin-navy px-4 text-white lg:hidden">
           <button
             type="button"
-            onClick={() => setOpen(false)}
-            aria-label={t("common.closeNav")}
-            className="rounded-lg p-1.5 text-slate-300 hover:bg-white/10 lg:hidden"
+            onClick={() => setOpen(true)}
+            aria-label={t("admin.nav.openMenu")}
+            className="rounded-lg p-2 hover:bg-white/10"
           >
-            <X className="h-5 w-5" aria-hidden="true" />
+            <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
+          <span className="text-sm font-semibold uppercase tracking-[0.16em]">
+            {t("admin.center.title")}
+          </span>
         </div>
 
-        {/* Scrollbars hidden (cova-scroll-hide) while scrolling stays fully
-            available: mouse wheel, touchpad, keyboard and touch. No entry is
-            clipped — the container keeps its full scrollable height. */}
-        <nav className="cova-scroll-hide min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-          {NAV_ITEMS.map(({ href, labelKey, icon: Icon, permission, tooltipKey }) => {
-            if (permission && !access.can(permission)) return null;
-            const active = pathname === href || pathname.startsWith(`${href}/`);
-            const link = (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-admin-active text-white"
-                    : "text-slate-300 hover:bg-admin-hover hover:text-white",
-                )}
-              >
-                <Icon className="h-4.5 w-4.5 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 truncate">{t(labelKey)}</span>
-              </Link>
-            );
-            return tooltipKey ? (
-              <Tooltip key={href} label={t(tooltipKey)}>
-                {link}
-              </Tooltip>
-            ) : (
-              link
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-admin-navy-line p-3">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <ArrowLeft className={cn("h-4.5 w-4.5", rtl && "rotate-180")} aria-hidden="true" />
-            {t("admin.nav.backToStudent")}
-          </Link>
+        {/* Light workspace (mirrored for RTL) */}
+        <div className="min-w-0 overflow-x-hidden">
+          <main id="admin-main" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+            {children}
+          </main>
         </div>
-      </aside>
-
-      {/* Mobile top bar */}
-      <div className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-admin-navy-line bg-admin-navy px-4 text-white lg:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label={t("admin.nav.openMenu")}
-          className="rounded-lg p-2 hover:bg-white/10"
-        >
-          <Menu className="h-5 w-5" aria-hidden="true" />
-        </button>
-        <span className="text-sm font-semibold uppercase tracking-[0.16em]">{t("admin.center.title")}</span>
-      </div>
-
-      {/* Light workspace (mirrored for RTL) */}
-      <div className={rtl ? "lg:pr-60" : "lg:pl-60"}>
-        <main id="admin-main" className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">{children}</main>
       </div>
     </div>
   );

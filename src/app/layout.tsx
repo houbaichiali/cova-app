@@ -1,10 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { Manrope, Playfair_Display } from "next/font/google";
+import { MotionProvider } from "@/components/ui/Motion";
 import { ToastProvider } from "@/components/ui/Toast";
 import { I18nProvider } from "@/i18n/client";
 import { LOCALE_DIR } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
 import "./globals.css";
+
+// Interface face + editorial display face, self-hosted by next/font (no
+// external font request at runtime, no layout shift).
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
+const playfair = Playfair_Display({ subsets: ["latin"], variable: "--font-playfair", display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "COVA — Community Of Visionary Achievers", template: "%s · COVA" },
@@ -16,18 +23,27 @@ export const viewport: Viewport = {
   themeColor: "#DCECF7",
 };
 
-// Runs before first paint: applies the saved theme (or the system preference)
-// and the text size so the page never flashes in the wrong look during hydration.
-const themeInitScript = `try{var t=localStorage.getItem("cova-theme");if(t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches)){var r=document.documentElement;r.classList.add("dark");r.style.colorScheme="dark"}var s=localStorage.getItem("cova-text-size");if(s==="small"||s==="large"){document.documentElement.dataset.textSize=s}}catch(e){}`;
+// Runs before first paint: applies the saved palette, the saved theme (or the
+// system preference) and the text size so the page never flashes in the wrong
+// look during hydration. The palette whitelist mirrors src/lib/palettes.ts
+// (scripts/test-palettes.ts keeps them in sync).
+const themeInitScript = `try{var ok=["soft-blue","three-blue","academic-tech-premium","forest-copper","midnight-lavender","arctic-minimal","burgundy-champagne","sage-stone","sand-terracotta","graphite-mint","mono-creative"];var p=localStorage.getItem("cova-palette");document.documentElement.dataset.palette=ok.indexOf(p)>-1?p:"soft-blue";var t=localStorage.getItem("cova-theme");if(t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches)){var r=document.documentElement;r.classList.add("dark");r.style.colorScheme="dark"}var s=localStorage.getItem("cova-text-size");if(s==="small"||s==="large"){document.documentElement.dataset.textSize=s}}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const locale = await getLocale();
   return (
-    <html lang={locale} dir={LOCALE_DIR[locale]} suppressHydrationWarning>
+    <html
+      lang={locale}
+      dir={LOCALE_DIR[locale]}
+      className={`${manrope.variable} ${playfair.variable}`}
+      suppressHydrationWarning
+    >
       <body className="bg-cova-bg text-cova-ink antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <I18nProvider initialLocale={locale}>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <MotionProvider>{children}</MotionProvider>
+          </ToastProvider>
         </I18nProvider>
       </body>
     </html>

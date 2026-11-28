@@ -5,10 +5,13 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 
 const variants: Record<ButtonVariant, string> = {
-  primary: "bg-blue-600 text-white border border-blue-600 hover:bg-blue-700",
+  // Palette-aware: --color-cova-primary carries the palette's action color and
+  // --color-cova-on-primary the readable label on it (white in light palettes,
+  // the dark surface tone in dark palettes).
+  primary: "bg-cova-primary text-cova-on-primary border border-cova-primary hover:brightness-110",
   secondary: "bg-white text-cova-ink border border-cova-line hover:bg-cova-pale",
   ghost: "bg-transparent text-cova-ink hover:bg-cova-pale border border-transparent",
-  danger: "bg-white text-red-800 border border-red-200 hover:bg-red-50",
+  danger: "bg-white text-cova-error border border-cova-error/30 hover:bg-cova-error/5",
 };
 
 const sizes: Record<ButtonSize, string> = {

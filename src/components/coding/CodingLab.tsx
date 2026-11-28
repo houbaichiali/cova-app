@@ -8,6 +8,7 @@ import { FileWarningCard } from "@/components/ui/FileWarningCard";
 import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { Card, CardBody } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { StaggerGroup, StaggerItem } from "@/components/ui/Motion";
 import { useToast } from "@/components/ui/Toast";
 import { useI18n } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
@@ -542,23 +543,27 @@ export function CodingLab({ assignmentId, assignmentTitle }: { assignmentId?: st
 
       {!language && !jupyterOpen && <section aria-labelledby="coding-languages" className="space-y-3">
         <div className="flex items-center gap-2"><Code2 className="h-5 w-5" aria-hidden="true" /><h2 id="coding-languages" className="text-lg font-semibold">{language ? t("coding.workspace") : t("coding.languages")}</h2></div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <StaggerGroup className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" stagger={0.05}>
           {LANGUAGES.map((item, index) => (
-            <button key={item.id} type="button" onClick={() => chooseLanguage(item.id)} aria-pressed={languageId === item.id} className={`min-h-28 rounded-xl border bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm ${languageId === item.id ? "border-cova-soft ring-2 ring-cova-soft" : "border-cova-line"}`}>
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">{item.id === "typescript" ? "TS" : item.id === "javascript" ? "JS" : item.id === "csharp" ? "C#" : item.id === "cpp" ? "C++" : item.id.toUpperCase().slice(0, 2)}</span>
-              <span className="mt-3 block font-semibold">{languageLabel(item.id)}</span>
-              <span className="mt-1 block font-mono text-xs text-cova-mute">.{item.extension}</span>
-              <span className="mt-2 block text-[11px] text-cova-mute">{item.runtime === "external" ? t("coding.externalRuntime") : t("coding.runtimeAvailable")}</span>
-              <span className="sr-only">{index + 1}</span>
-            </button>
+            <StaggerItem key={item.id}>
+              <button type="button" onClick={() => chooseLanguage(item.id)} aria-pressed={languageId === item.id} className={`cova-neon-card min-h-28 w-full rounded-xl border bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm ${languageId === item.id ? "border-cova-soft ring-2 ring-cova-soft" : "border-cova-line"}`}>
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">{item.id === "typescript" ? "TS" : item.id === "javascript" ? "JS" : item.id === "csharp" ? "C#" : item.id === "cpp" ? "C++" : item.id.toUpperCase().slice(0, 2)}</span>
+                <span className="mt-3 block font-semibold">{languageLabel(item.id)}</span>
+                <span className="mt-1 block font-mono text-xs text-cova-mute">.{item.extension}</span>
+                <span className="mt-2 block text-[11px] text-cova-mute">{item.runtime === "external" ? t("coding.externalRuntime") : t("coding.runtimeAvailable")}</span>
+                <span className="sr-only">{index + 1}</span>
+              </button>
+            </StaggerItem>
           ))}
-          <button type="button" onClick={() => setJupyterOpen(true)} className="min-h-28 rounded-xl border border-cova-line bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">Jp</span>
-            <span className="mt-3 block font-semibold">Jupyter Notebook</span>
-            <span className="mt-1 block font-mono text-xs text-cova-mute">.ipynb</span>
-            <span className="mt-2 block text-[11px] text-cova-mute">{t("coding.jupyterTileDescription")}</span>
-          </button>
-        </div>
+          <StaggerItem>
+            <button type="button" onClick={() => setJupyterOpen(true)} className="cova-neon-card min-h-28 w-full rounded-xl border border-cova-line bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-cova-soft hover:shadow-sm">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cova-pale font-mono text-sm font-bold text-cova-ink">Jp</span>
+              <span className="mt-3 block font-semibold">Jupyter Notebook</span>
+              <span className="mt-1 block font-mono text-xs text-cova-mute">.ipynb</span>
+              <span className="mt-2 block text-[11px] text-cova-mute">{t("coding.jupyterTileDescription")}</span>
+            </button>
+          </StaggerItem>
+        </StaggerGroup>
       </section>}
 
       {jupyterOpen && <JupyterNotebook onBack={() => setJupyterOpen(false)} />}

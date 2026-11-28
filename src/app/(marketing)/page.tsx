@@ -41,7 +41,7 @@ export default async function LandingPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:py-24">
           <div>
             <Badge tone="soft">{t("landing.hero.badge")}</Badge>
-            <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+            <h1 className="font-display mt-5 text-display font-semibold tracking-tight">
               {t("landing.hero.title")}
             </h1>
             <p className="mt-5 max-w-xl text-lg text-cova-mute">{t("landing.hero.body")}</p>
