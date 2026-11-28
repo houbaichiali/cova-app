@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { TextAreaField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useI18n } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 import type { MessageKey } from "@/i18n/messages/en";
@@ -18,16 +20,6 @@ import type { ChallengeType } from "@/data/challenges";
 
 const SUBMISSION_BUCKET = "assignment-submissions";
 const ATTACHMENT_BUCKET = "assignment-attachments";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const ALLOWED_FILE_TYPES = new Set([
-  "application/pdf", "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain", "image/png", "image/jpeg",
-]);
 
 type AssignmentRecord = {
   id: string;
@@ -118,6 +110,7 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
   const [response, setResponse] = useState("");
   const [answers, setAnswers] = useState<Array<string | number | number[]>>([]);
   const [file, setFile] = useState<File | null>(null);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
   const [grades, setGrades] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   const [savingGrade, setSavingGrade] = useState<string | null>(null);
@@ -250,13 +243,13 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
       toast.push(t("assignments.detail.deadlineClosed"));
       return;
     }
-    if (file && !ALLOWED_FILE_TYPES.has(file.type)) {
-      toast.push(t("assignments.fileTypeError"));
-      return;
-    }
-    if (file && file.size > MAX_FILE_SIZE) {
-      toast.push(t("assignments.fileSizeError"));
-      return;
+    if (file) {
+      // Spec Phase 4: shared policy with signature verification on submissions.
+      const check = await validateFile("courseAttachment", file);
+      if (!check.ok) {
+        setFileIssue(check.issue);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -402,7 +395,14 @@ export function AssignmentDetailView({ assignmentId }: { assignmentId: string })
                 <TextAreaField id="assignment-response" label={t("assignments.detail.responseLabel")} placeholder={t("assignments.detail.responsePlaceholder")} value={response} onChange={(event) => setResponse(event.target.value)} maxLength={50000} disabled={!submissionWindowOpen || submitting} />
                 <div>
                   <label htmlFor="assignment-file" className="mb-1.5 block text-sm font-medium">{t("assignments.detail.fileLabel")}</label>
-                  <input id="assignment-file" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] ?? null)} disabled={!submissionWindowOpen || submitting} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />
+                  <input id="assignment-file" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg" onChange={(event) => { setFileIssue(null); setFile(event.target.files?.[0] ?? null); }} disabled={!submissionWindowOpen || submitting} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" />
+                  {fileIssue && (
+                    <FileWarningCard
+                      issue={fileIssue}
+                      onChooseAnother={() => (document.getElementById("assignment-file") as HTMLInputElement | null)?.click()}
+                      onDismiss={() => setFileIssue(null)}
+                    />
+                  )}
                   <p className="mt-1 text-xs text-cova-mute">{t("assignments.detail.fileHint")}</p>
                 </div>
                 <Button type="submit" disabled={!submissionWindowOpen || submitting}><Send className="h-4 w-4" aria-hidden="true" />{submitting ? t("assignments.detail.submitting") : t("assignments.detail.submit")}</Button>

@@ -12,6 +12,8 @@ import { SelectFilter } from "@/components/ui/FormField";
 import { Tabs } from "@/components/ui/Tabs";
 import { TextAreaField, TextField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useI18n } from "@/i18n/client";
 import { challenges, type ChallengeContent, type ChallengeType } from "@/data/challenges";
 import { getSupabase } from "@/lib/supabase/client";
@@ -20,7 +22,6 @@ import type { ChallengeKind, Difficulty } from "@/types";
 
 const TABS = ["All", "Daily", "Weekly", "Coding", "Community"] as const;
 const ALL = "Any difficulty";
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const FILE_BUCKET = "challenge-files";
 type ChallengeRow = { id: string; created_by: string; title: string; description: string; category: ChallengeKind; difficulty: Difficulty; points: number; minutes: number; exercise_type: ChallengeType; questions: ChallengeContent["questions"]; attachment_path: string | null; attachment_name: string | null; created_at: string };
 
@@ -50,6 +51,7 @@ export function ChallengesBoard() {
   const [correctIndex, setCorrectIndex] = useState(0);
   const [pairsText, setPairsText] = useState("");
   const [challengeFile, setChallengeFile] = useState<File | null>(null);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,7 +93,14 @@ export function ChallengesBoard() {
   async function createChallenge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!userId || saving) return;
-    if (challengeFile && challengeFile.size > MAX_FILE_SIZE) { toast.push(t("challenges.fileTooLarge")); return; }
+    if (challengeFile) {
+      // Spec Phase 4: general-attachment policy (size + type + signature).
+      const check = await validateFile("general", challengeFile);
+      if (!check.ok) {
+        setFileIssue(check.issue);
+        return;
+      }
+    }
     const questions: ChallengeContent["questions"] = [];
     const answerKey: Array<number | number[]> = [];
     if (exerciseType === "matching") {
@@ -189,7 +198,7 @@ export function ChallengesBoard() {
             <TextAreaField id="challenge-options" label={exerciseType === "ordering" ? t("challenges.stepsLabel") : t("challenges.optionsLabel")} hint={exerciseType === "ordering" ? t("challenges.orderHint") : t("challenges.optionsHint")} value={optionsText} onChange={(event) => setOptionsText(event.target.value)} required />
             {exerciseType !== "ordering" && <TextField id="challenge-correct" label={t("challenges.correctIndex")} type="number" min={1} max={Math.max(2, options.length)} value={correctIndex + 1} onChange={(event) => setCorrectIndex(Number(event.target.value) - 1)} required />}
           </> : <TextAreaField id="challenge-prompt" label={t("challenges.questionLabel")} value={prompt} onChange={(event) => setPrompt(event.target.value)} required />}
-          <div><label htmlFor="challenge-attachment" className="mb-1.5 block text-sm font-medium">{t("challenges.fileLabel")}</label><input id="challenge-attachment" type="file" onChange={(event) => setChallengeFile(event.target.files?.[0] ?? null)} disabled={saving} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" /><p className="mt-1 text-xs text-cova-mute">{t("challenges.fileHint")}</p>{challengeFile && <p className="mt-1 text-xs text-cova-mute"><FilePlus2 className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{challengeFile.name}</p>}</div>
+          <div><label htmlFor="challenge-attachment" className="mb-1.5 block text-sm font-medium">{t("challenges.fileLabel")}</label><input id="challenge-attachment" type="file" onChange={(event) => { setFileIssue(null); setChallengeFile(event.target.files?.[0] ?? null); }} disabled={saving} className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5" /><p className="mt-1 text-xs text-cova-mute">{t("challenges.fileHint")}</p>{challengeFile && <p className="mt-1 text-xs text-cova-mute"><FilePlus2 className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{challengeFile.name}</p>}{fileIssue && <FileWarningCard issue={fileIssue} onChooseAnother={() => (document.getElementById("challenge-attachment") as HTMLInputElement | null)?.click()} onDismiss={() => setFileIssue(null)} />}</div>
           <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="ghost" disabled={saving} onClick={() => setFormOpen(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={saving || !userId}>{saving ? t("challenges.creating") : t("challenges.createButton")}</Button></div>
           {!userId && <p className="text-sm text-cova-mute">{t("challenges.signInToCreate")}</p>}
         </form>

@@ -136,6 +136,8 @@ export interface SocialState {
   notifications: SocialNotification[];
 }
 
-export type ActionResult<T = undefined> = { ok: true; value: T } | { ok: false; error: string };
+export type ActionResult<T = undefined> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; /** Structured file-policy issue, for the rich warning cards. */ issue?: import("@/lib/file-policy").FileIssue };
 
 export type JoinOutcome = "joined" | "requested" | "already-member" | "already-requested";

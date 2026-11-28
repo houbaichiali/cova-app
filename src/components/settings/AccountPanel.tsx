@@ -6,9 +6,12 @@ import { ShieldOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { TextField } from "@/components/ui/FormField";
+import { ConnectedAccounts } from "@/components/auth/ConnectedAccounts";
+import { PasswordRequirements } from "@/components/auth/PasswordRequirements";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
+import { isPasswordValid, validatePassword } from "@/lib/validation";
 import { useUserSettings } from "@/lib/user-settings";
 
 /**
@@ -39,8 +42,11 @@ export function AccountPanel() {
 
   async function changePassword(event: FormEvent) {
     event.preventDefault();
-    if (newPassword.length < 8) {
-      toast.push(t("settings.passwordTooShort"));
+    // Spec 3.3: the full policy (8–50, upper, lower, digit, special, no
+    // whitespace) — the checklist above already guides the person.
+    if (!isPasswordValid(newPassword)) {
+      const result = validatePassword(newPassword);
+      toast.push(result.ok ? t("settings.passwordTooShort") : t(result.error.key));
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -133,6 +139,10 @@ export function AccountPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Identity linking (spec 5.4): real provider attachments, verified by
+          the OAuth provider itself — never merged on an unverified email. */}
+      <ConnectedAccounts />
+
       <form onSubmit={changePassword} className="space-y-3" key={formKey}>
         <p className="text-sm font-medium">{t("settings.password")}</p>
         <p className="text-sm text-cova-mute">{t("settings.passwordDesc")}</p>
@@ -147,6 +157,7 @@ export function AccountPanel() {
           className={inputClass}
         />
         <div className="grid gap-3 sm:grid-cols-2">
+        <div>
           <input
             type="password"
             autoComplete="new-password"
@@ -155,9 +166,12 @@ export function AccountPanel() {
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             required
-            minLength={8}
+            maxLength={50}
             className={inputClass}
           />
+          {/* Spec 3.4: dynamic requirements on the password change form too. */}
+          <PasswordRequirements value={newPassword} />
+        </div>
           <input
             type="password"
             autoComplete="new-password"
@@ -166,7 +180,7 @@ export function AccountPanel() {
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             required
-            minLength={8}
+            maxLength={50}
             className={inputClass}
           />
         </div>

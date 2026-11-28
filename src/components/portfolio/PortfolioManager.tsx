@@ -23,6 +23,8 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Switch } from "@/components/ui/Switch";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import type { FileIssue } from "@/lib/file-policy";
 import { useT } from "@/i18n/client";
 import { splitTags } from "@/lib/profile";
 import {
@@ -425,6 +427,7 @@ function ProjectsTab({ portfolio }: { portfolio: Portfolio }) {
   const toast = useToast();
   const [editing, setEditing] = useState<PortfolioProjectRow | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [coverIssue, setCoverIssue] = useState<FileIssue | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function persist(project: PortfolioProjectRow) {
@@ -623,14 +626,23 @@ function ProjectsTab({ portfolio }: { portfolio: Portfolio }) {
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
+                    setCoverIssue(null);
                     if (!file) return;
                     setUploading(true);
                     const result = await portfolio.uploadImage(file);
                     setUploading(false);
                     if (result.ok) setEditing({ ...editing, cover_image_url: result.value });
+                    else if (result.issue) setCoverIssue(result.issue);
                     else toast.push(result.error);
                   }}
                 />
+                {coverIssue && (
+                  <FileWarningCard
+                    issue={coverIssue}
+                    onChooseAnother={() => fileRef.current?.click()}
+                    onDismiss={() => setCoverIssue(null)}
+                  />
+                )}
                 <Button variant="secondary" onClick={() => fileRef.current?.click()} disabled={uploading}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
                   {t("portfolio.projects.uploadCover")}
@@ -900,6 +912,7 @@ function CertificatesTab({ portfolio }: { portfolio: Portfolio }) {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [docIssue, setDocIssue] = useState<FileIssue | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     kind: "upload" as "upload" | "external",
@@ -1026,14 +1039,23 @@ function CertificatesTab({ portfolio }: { portfolio: Portfolio }) {
                     onChange={async (event) => {
                       const file = event.target.files?.[0];
                       event.target.value = "";
+                      setDocIssue(null);
                       if (!file) return;
                       setUploading(true);
                       const result = await portfolio.uploadDocument(file);
                       setUploading(false);
                       if (result.ok) setForm({ ...form, file_path: result.value });
+                      else if (result.issue) setDocIssue(result.issue);
                       else toast.push(result.error);
                     }}
                   />
+                  {docIssue && (
+                    <FileWarningCard
+                      issue={docIssue}
+                      onChooseAnother={() => fileRef.current?.click()}
+                      onDismiss={() => setDocIssue(null)}
+                    />
+                  )}
                   <Button variant="secondary" onClick={() => fileRef.current?.click()} disabled={uploading}>
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
                     {form.file_path ? t("portfolio.cert.fileDone") : t("portfolio.cert.filePick")}

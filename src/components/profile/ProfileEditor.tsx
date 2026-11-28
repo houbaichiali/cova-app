@@ -15,11 +15,14 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SelectFilter, TextAreaField, TextField } from "@/components/ui/FormField";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { ProfileDetailsEditor, SocialLinksEditor } from "@/components/profile/ProfileDetailsEditor";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Switch } from "@/components/ui/Switch";
 import { Tabs } from "@/components/ui/Tabs";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
 import { useToast } from "@/components/ui/Toast";
 import { useT } from "@/i18n/client";
+import type { FileIssue } from "@/lib/file-policy";
 import { levelFor } from "@/lib/progress";
 import { splitTags, useMyProfile, type ProfileFormValues } from "@/lib/profile";
 import { DEFAULT_APPEARANCE, type Appearance } from "@/lib/appearance";
@@ -30,7 +33,7 @@ import {
 } from "@/lib/profile-data";
 import { useHydrated } from "@/lib/use-hydrated";
 
-type EditorTab = "identity" | "appearance" | "sections" | "privacy";
+type EditorTab = "identity" | "personal" | "social" | "appearance" | "sections" | "privacy";
 
 const SECTION_LABELS: Record<string, string> = {
   show_xp: "profile.privacy.xp",
@@ -61,6 +64,7 @@ export function ProfileEditor() {
 
   const [tab, setTab] = useState<EditorTab>("identity");
   const [uploading, setUploading] = useState(false);
+  const [photoIssue, setPhotoIssue] = useState<FileIssue | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [headline, setHeadline] = useState("");
   const [domain, setDomain] = useState("");
@@ -140,9 +144,12 @@ export function ProfileEditor() {
     event.target.value = "";
     if (!file) return;
     setUploading(true);
+    setPhotoIssue(null);
     const uploaded = await uploadAvatar(file);
     if (!uploaded.ok) {
-      toast.push(uploaded.error);
+      // Spec 4.4–4.6: structured file issues open the rich warning card.
+      if (uploaded.issue) setPhotoIssue(uploaded.issue);
+      else toast.push(uploaded.error);
       setUploading(false);
       return;
     }
@@ -217,12 +224,14 @@ export function ProfileEditor() {
       {/* action bar: preview + public link */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          tabs={["identity", "appearance", "sections", "privacy"] as const}
+          tabs={["identity", "personal", "social", "appearance", "sections", "privacy"] as const}
           value={tab}
           onChange={setTab}
           label={t("profile.editor.tabs")}
           labels={{
             identity: t("profile.editor.tabIdentity"),
+            personal: t("profile.editor.tabPersonal"),
+            social: t("profile.editor.tabSocial"),
             appearance: t("profile.editor.tabAppearance"),
             sections: t("profile.editor.tabSections"),
             privacy: t("profile.editor.tabPrivacy"),
@@ -272,10 +281,17 @@ export function ProfileEditor() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
+                accept="image/png,image/jpeg,image/webp"
                 onChange={onPhotoPicked}
                 className="hidden"
               />
+              {photoIssue && (
+                <FileWarningCard
+                  issue={photoIssue}
+                  onChooseAnother={() => fileRef.current?.click()}
+                  onDismiss={() => setPhotoIssue(null)}
+                />
+              )}
               <div className="min-w-0">
                 <p className="truncate font-semibold">{displayName || "Student"}</p>
                 <p className="truncate text-sm text-cova-mute">{headline || profile.user_code}</p>
@@ -376,6 +392,12 @@ export function ProfileEditor() {
           </Card>
         </div>
       )}
+
+      {/* Personal Information + Education + per-field privacy (Phases 6-7). */}
+      {tab === "personal" && <ProfileDetailsEditor />}
+
+      {/* Social media links with per-platform visibility (Phase 6.2). */}
+      {tab === "social" && <SocialLinksEditor />}
 
       {tab === "appearance" && (
         <div className="space-y-4">

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { fail, ok } from "@/lib/result";
 
+import { validateFile } from "@/lib/file-policy";
+
 import type { ActionResult } from "@/types/social";
 
 import { getSupabase } from "@/lib/supabase/client";
@@ -37,7 +39,7 @@ export interface ProfileFormValues {
 }
 
 const AVATAR_BUCKET = "avatars";
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+// Avatar limit moved to the shared file policy (512 KB) — src/lib/file-policy.ts
 
 /** Splits a comma-separated field into clean, deduplicated tags (max 12). */
 export function splitTags(raw: string): string[] {
@@ -79,14 +81,23 @@ export function useMyProfile() {
     };
   }, []);
 
-  /** Uploads the photo to the public avatars bucket and returns its public URL. */
+  /** Uploads the photo to the public avatars bucket and returns its public URL.
+   * The file is fully validated first (spec Phase 4): size (512 KB), type
+   * (JPG/JPEG/PNG/WEBP) and real content signature — a renamed PDF cannot
+   * pass. The structured issue rides along for the rich warning card. */
   const uploadAvatar = useCallback(async (file: File): Promise<ActionResult<string>> => {
     const supabase = getSupabase();
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) return fail("Sign in to change your photo.");
-    if (file.size > AVATAR_MAX_BYTES) return fail("The photo must be 2 MB or smaller.");
+    const check = await validateFile("avatar", file);
+    if (!check.ok) {
+      return fail(
+        `Unsupported file: ${check.issue.fileName} (${check.issue.actualKB} KB; max ${check.issue.maxKB} KB; accepts ${check.issue.expected}).`,
+        check.issue,
+      );
+    }
 
-    const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : file.type === "image/gif" ? "gif" : "jpg";
+    const ext = check.extension === "png" ? "png" : check.extension === "webp" ? "webp" : "jpg";
     const path = `${auth.user.id}/avatar-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from(AVATAR_BUCKET).upload(path, file, {
       contentType: file.type || "image/jpeg",
@@ -94,7 +105,7 @@ export function useMyProfile() {
     });
     if (error) {
       if (error.message.includes("mime type") || error.message.includes("file size")) {
-        return fail("The photo must be a PNG, JPG, WebP or GIF of 2 MB or smaller.");
+        return fail("The photo must be a PNG, JPG or WebP of 512 KB or smaller.");
       }
       return fail(error.message);
     }

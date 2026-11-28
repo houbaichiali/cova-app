@@ -20,7 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run build",
-    "test:logic": "tsx scripts/test-badge-progression.ts && tsx scripts/test-dubbing-logic.ts && tsx scripts/test-round6-logic.ts && tsx scripts/test-xp-levels.ts && tsx scripts/test-security.ts && tsx scripts/test-palettes.ts"
+    "test:logic": "tsx scripts/test-badge-progression.ts && tsx scripts/test-dubbing-logic.ts && tsx scripts/test-round6-logic.ts && tsx scripts/test-xp-levels.ts && tsx scripts/test-security.ts && tsx scripts/test-palettes.ts && tsx scripts/test-validation.ts && tsx scripts/test-file-policy.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

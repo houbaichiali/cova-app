@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/FormField";
+import { SocialAuthButtons } from "@/components/auth/SocialAuthButtons";
 import { useT } from "@/i18n/client";
 import { authActions } from "@/lib/auth";
 import { validateLogin, type FieldErrors } from "@/lib/validation";
@@ -66,6 +67,7 @@ export function LoginForm() {
         type="email"
         autoComplete="email"
         placeholder="name@school.edu"
+        maxLength={254}
         value={values.email}
         error={errors.email ? t(errors.email) : undefined}
         onChange={(e) =>
@@ -78,12 +80,19 @@ export function LoginForm() {
         label={t("auth.field.password")}
         type="password"
         autoComplete="current-password"
+        maxLength={50}
         value={values.password}
         error={errors.password ? t(errors.password) : undefined}
         onChange={(e) =>
           setValues((v) => ({ ...v, password: e.target.value }))
         }
       />
+
+      <div className="flex justify-end">
+        <Link href="/forgot-password" className="text-sm font-medium text-cova-ink underline underline-offset-2">
+          {t("auth.login.forgot")}
+        </Link>
+      </div>
 
       <Button type="submit" className="w-full" disabled={submitting}>
         {submitting && (
@@ -94,6 +103,8 @@ export function LoginForm() {
         )}
         {submitting ? t("auth.login.submitting") : t("common.logIn")}
       </Button>
+
+      <SocialAuthButtons />
 
       <p className="text-center text-sm text-cova-mute">
         {t("auth.login.newHere")}{" "}

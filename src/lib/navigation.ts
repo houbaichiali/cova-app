@@ -29,6 +29,9 @@ export interface NavItem {
   labelKey?: MessageKey;
   label?: Record<Locale, string>;
   icon: LucideIcon;
+  /** Contextual help shown as an accessible tooltip (hover + keyboard focus),
+   * never permanently in the navigation. */
+  tooltipKey?: MessageKey;
 }
 
 export interface NavSection {
@@ -65,7 +68,12 @@ export const navSections: NavSection[] = [
     items: [
       { href: "/profile", labelKey: "nav.profile", icon: CircleUserRound },
       { href: "/notifications", labelKey: "nav.notifications", icon: Bell },
-      { href: "/saved", labelKey: "nav.saved", icon: Bookmark },
+      {
+        href: "/saved",
+        labelKey: "nav.saved",
+        icon: Bookmark,
+        tooltipKey: "nav.tooltip.savedPosts",
+      },
       { href: "/leaderboard", labelKey: "nav.leaderboard", icon: Trophy },
       { href: "/settings", labelKey: "nav.settings", icon: Settings },
       { href: "/admin", labelKey: "nav.admin", icon: ShieldCheck },

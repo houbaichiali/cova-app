@@ -309,6 +309,7 @@ export function PeopleHub({ me }: { me: SocialUser }) {
         placeholder="Find people by name or ID"
         value={query}
         onChange={setQuery}
+        maxLength={100}
         className="max-w-xl"
       />
 

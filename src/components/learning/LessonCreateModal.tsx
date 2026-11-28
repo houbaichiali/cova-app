@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { TextAreaField, TextField } from "@/components/ui/FormField";
 import { useToast } from "@/components/ui/Toast";
+import { FileWarningCard } from "@/components/ui/FileWarningCard";
+import { validateFile, type FileIssue } from "@/lib/file-policy";
 import { useT } from "@/i18n/client";
 import { getSupabase } from "@/lib/supabase/client";
 
@@ -16,7 +18,6 @@ export interface ModuleOption {
 }
 
 const LESSON_FILES_BUCKET = "lesson-files";
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 /**
  * "Add a lesson" flow. External and Native are LESSON types; the lesson always
@@ -49,6 +50,7 @@ export function LessonCreateModal({
   const [objectives, setObjectives] = useState("");
   const [duration, setDuration] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [fileIssue, setFileIssue] = useState<FileIssue | null>(null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -115,10 +117,12 @@ export function LessonCreateModal({
       if (error) throw error;
       lessonId = (inserted as { id: string }).id;
 
-      // External lesson: files upload right here, straight into Storage.
+      // External lesson: files upload right here, straight into Storage —
+      // each one passes the shared policy first (spec Phase 4).
       for (const file of files) {
-        if (file.size > MAX_FILE_SIZE) {
-          toast.push(t("lessons.files.tooBig"));
+        const check = await validateFile("courseAttachment", file);
+        if (!check.ok) {
+          setFileIssue(check.issue);
           continue;
         }
         const safeName = file.name.replace(/[^\p{L}\p{N}._-]+/gu, "-");
@@ -231,11 +235,18 @@ export function LessonCreateModal({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.webp"
                 onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
                 className="block w-full rounded-lg border border-cova-line bg-white p-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-cova-pale file:px-3 file:py-1.5"
               />
               <p className="mt-1 text-xs text-cova-mute">{t("lessons.files.formatsHint")}</p>
+              {fileIssue && (
+                <FileWarningCard
+                  issue={fileIssue}
+                  onChooseAnother={() => fileInputRef.current?.click()}
+                  onDismiss={() => setFileIssue(null)}
+                />
+              )}
               {files.length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-cova-mute">
                   {files.map((file, index) => <li key={index}>• {file.name} ({Math.max(1, Math.round(file.size / 1024))} KB)</li>)}
